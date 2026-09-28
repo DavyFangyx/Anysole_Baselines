@@ -1,3 +1,4 @@
+from __future__ import annotations
 import torch.nn as nn
 from typing import Optional
 from config import Config, ModelType
@@ -27,9 +28,14 @@ def model_from_config(config: Config, is_prior: bool) -> tuple[nn.Module, Option
                 n_heads=config["transformer_n_heads"],
                 d_ff=config["transformer_d_ff"],
                 dropout=config["transformer_dropout"],
+                # --no-imu: 38-dim insole, IMU condition embeddings deleted.
+                imu_available=bool(config.get("imu_available", True)),
             )
         model_translation = None
-        if not is_prior:
+        # The translation model's sole condition is the IMU channels, so it is
+        # only built when the config trains it (--no-imu configs set
+        # "train_translation": false and evaluate pose only).
+        if not is_prior and config.get("train_translation", True):
             model_translation = TransformerTranslation(
                 c_dim=config["input_dim"],
                 input_T=config["input_T"],

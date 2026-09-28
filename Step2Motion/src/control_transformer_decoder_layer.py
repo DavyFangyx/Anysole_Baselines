@@ -1,3 +1,4 @@
+from __future__ import annotations
 import torch
 import torch.nn.functional as F
 from insole_multiheadattention import InsoleMultiheadAttention
@@ -21,6 +22,10 @@ class ControlTransformerDecoderLayer(nn.Module):
         bias: bool = True,
         device=None,
         dtype=None,
+        # Number of per-group condition streams (one attention head per
+        # stream): 8 with IMU (heel/toes/IMU/others x 2 feet), 6 for the
+        # --no-imu variant (IMU streams deleted).
+        n_cond_streams: int = 8,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -28,8 +33,7 @@ class ControlTransformerDecoderLayer(nn.Module):
         # self.cross_attn = MultiheadAttention(
         #     d_model, nhead, dropout=dropout, batch_first=batch_first, bias=bias, **factory_kwargs  # type: ignore
         # )
-        n_heads = 8
-        self.cross_attn = InsoleMultiheadAttention(d_model, d_model // n_heads, d_model // n_heads, n_heads)
+        self.cross_attn = InsoleMultiheadAttention(d_model, d_model // n_cond_streams, d_model // n_cond_streams, n_cond_streams)
 
         self.norm = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)  # type: ignore
         self.dropout = Dropout(dropout)

@@ -1,13 +1,13 @@
+from __future__ import annotations
 import torch
 import warnings
 from argparse import ArgumentParser, Namespace
 from dataset import MotionDataset
-
-
+from workspace import WORKSPACE_ROOT, resolve_path
 class Normalizer:
     def __init__(self, db: MotionDataset):
-        poses = torch.cat(prior_db.poses, dim=0)  # type: ignore
-        insoles = torch.cat(insole_db.insole, dim=0)  # type: ignore
+        poses = torch.cat(db.poses, dim=0)
+        insoles = torch.cat(db.insole, dim=0)
 
         def compute_mean_std(data: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             mean = data.mean(dim=0).float()
@@ -59,9 +59,24 @@ class Normalizer:
 
 
 def main(args: Namespace) -> None:
+    # Canonical model input: the normalizer belongs to the dataset variant it
+    # was built from (normally by the build_gait.py adapter from the train
+    # split only); never written back to upstream/dependency directories.
+    output = (
+        WORKSPACE_ROOT
+        / f"model_inputs/Step2Motion/{args.adapter_version}/{args.name}"
+        / f"normalizer_{args.name}.pth"
+    )
+    if args.skip_existing and output.is_file():
+        print(f"skip {output} (exists)")
+        return
     db = MotionDataset.load(args.db, torch.device("cpu"))
     normalizer = Normalizer(db)
-    torch.save(normalizer, f"./configs/normalizer_{args.name}.pth")
+    # Ensure pickle records this class as `normalizer.Normalizer` instead of `__main__`.
+    import normalizer as normalizer_mod
+    normalizer.__class__ = normalizer_mod.Normalizer
+    output.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(normalizer, output)
 
 
 if __name__ == "__main__":
@@ -71,6 +86,12 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("name", type=str, help="Name of the normalizer")
     parser.add_argument("db", type=str, help="Path to the dataset containing the control net data (insole)")
+    parser.add_argument("--adapter-version", type=str, default="adapter_v1",
+                        help="Step2Motion adapter version under model_inputs/Step2Motion/")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--skip-existing", action="store_true", help="Skip when the normalizer exists.")
+    mode.add_argument("--force", action="store_true", help="Recompute and overwrite the normalizer.")
     args = parser.parse_args()
+    args.db = resolve_path(args.db)
 
     main(args)

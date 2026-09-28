@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import os
 import random
@@ -141,7 +142,7 @@ def generate_bvh(input_dir: str) -> None:
 
 def process_pose_file(
     path: str,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
     bvh = BVH()
     bvh.load(path)
     local_rotations, local_positions, parents, offsets, _, _ = bvh.get_data()
@@ -160,6 +161,7 @@ def process_pose_file(
         global_positions,
         global_rotations,
         torch.from_numpy(offsets),
+        [str(name) for name in bvh.data["names"]],
     )
 
 
@@ -214,7 +216,7 @@ def process_files(
         right_data = get_data(insole["right"].item())
         insole_data = np.concatenate([left_data, right_data], axis=-1)
         insole_data = torch.from_numpy(insole_data).float()
-        pose_data, quats, parents, global_pos, global_rot, offsets = process_pose_file(pose_path)
+        pose_data, quats, parents, global_pos, global_rot, offsets, joint_names = process_pose_file(pose_path)
         pose_data = pose_data[:-1]  # remove last frame to match insole data
         quats = quats[:-1]
         global_pos = global_pos[:-1]
@@ -228,7 +230,18 @@ def process_files(
             dim=0,
         )
 
-        files_data[key] = (insole_data, pose_data, quats, displacements, parents, offsets, global_rot)
+        files_data[key] = (
+            insole_data,
+            pose_data,
+            quats,
+            displacements,
+            parents,
+            offsets,
+            global_rot,
+            os.path.abspath(pose_path),
+            1.0 / 30.0,
+            joint_names,
+        )
 
     # Create the datasets
     def create_dataset(subjects: list[str], name: str) -> MotionDataset:  # type: ignore
@@ -258,6 +271,10 @@ def process_files(
             target_sample_rate=30.0,
             foot_indices=[7, 8, 3, 4],
         )
+        dataset.joint_names = list(data[0][9])
+        dataset.raw_bvh_paths = [d[7] for d in data]
+        dataset.raw_start_times = [d[8] for d in data]
+        dataset.raw_end_times = [d[8] + len(dataset.poses[index]) / 30.0 for index, d in enumerate(data)]
         print(f"{name} - Insole: {insole.shape}, Pose: {pose.shape}")
         torch.save(dataset, os.path.join(args.input_dir, f"{args.name}_{name}.pt"))
         return dataset

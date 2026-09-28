@@ -1,3 +1,4 @@
+from __future__ import annotations
 import torch.nn.functional as F
 from typing import Callable, Optional, Union
 from torch import Tensor

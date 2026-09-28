@@ -1,7 +1,10 @@
+from __future__ import annotations
 import json
 import os
 from typing import TypedDict
 from enum import Enum
+
+from workspace import resolve_config_paths
 
 
 class PredictionMode(Enum):
@@ -71,6 +74,8 @@ def load_config(path: str) -> Config:
 
     with open(path, "r") as f:
         config = json.load(f)
+
+    resolve_config_paths(config)
 
     assert config["input_T"] % 2 == 0, "input_T must be divisible by 2"
 

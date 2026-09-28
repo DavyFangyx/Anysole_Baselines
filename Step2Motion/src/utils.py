@@ -1,3 +1,5 @@
+from __future__ import annotations
+import prefer_env_site  # noqa: F401  # must run before pymotion imports
 import math
 import numpy as np
 import torch
@@ -31,7 +33,9 @@ def data_augmentation(
     x_0 = x_0 @ rot_y
     x_0 = x_0.view(x_0_shape)
 
-    if dataset is not None:
+    # --no-imu datasets have no acceleration channels to rotate; the yaw
+    # augmentation skips the insole entirely in that case (has_imu=False).
+    if dataset is not None and getattr(dataset, "has_imu", True):
         c_lacc = c[..., slice(*dataset.l_acceleration_idx)]
         c_racc = c[..., slice(*dataset.r_acceleration_idx)]
         c_lacc = c_lacc @ rot_y

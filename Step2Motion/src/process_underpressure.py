@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import os
 import torch
@@ -71,7 +72,7 @@ def main(args: Namespace) -> None:
         print(f"Processing {file} -----------------")
         insole_data = process_insole_file(insole_file, find_weight(file))
         sync_data = process_sync_file(sync_file)
-        pose_data, quats, parents, global_pos, global_rot, offsets = process_pose_file(pose_file)
+        pose_data, quats, parents, global_pos, global_rot, offsets, joint_names = process_pose_file(pose_file)
         print(f"Processed {file} - Insole: {insole_data.shape}, Pose: {pose_data.shape}, Sync: {sync_data}")
 
         insole_data, pose_data, quats, global_pos, global_rot = sync_insole_to_pose(
@@ -89,7 +90,19 @@ def main(args: Namespace) -> None:
             dim=0,
         )
 
-        files_data[file] = (insole_data, pose_data, quats, displacements, parents, offsets, global_rot)
+        raw_start_time = float(sync_data["mocap"][0]) / args.pose_hz + 1.0 / args.target_hz
+        files_data[file] = (
+            insole_data,
+            pose_data,
+            quats,
+            displacements,
+            parents,
+            offsets,
+            global_rot,
+            os.path.abspath(pose_file),
+            raw_start_time,
+            joint_names,
+        )
 
     # Create the datasets
     def create_dataset(files: list, name: str) -> MotionDataset:  # type: ignore
@@ -118,6 +131,13 @@ def main(args: Namespace) -> None:
             target_sample_rate=args.target_hz,
             foot_indices=[7, 8, 3, 4],
         )
+        dataset.joint_names = list(data[0][9])
+        dataset.raw_bvh_paths = [files_data[file][7] for file in files]
+        dataset.raw_start_times = [files_data[file][8] for file in files]
+        dataset.raw_end_times = [
+            files_data[file][8] + len(dataset.poses[index]) / args.target_hz
+            for index, file in enumerate(files)
+        ]
         print(f"{name} - Insole: {insole.shape}, Pose: {pose.shape}")
         torch.save(dataset, os.path.join(args.input_dir, f"{args.name}_{name}.pt"))
         return dataset
@@ -167,7 +187,7 @@ def process_sync_file(path: str) -> Dict[str, Tuple[int, int]]:
 
 def process_pose_file(
     path: str,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
     remove_joints = [11]
     """
         0, # hips
@@ -222,6 +242,7 @@ def process_pose_file(
         global_positions,
         global_rotations,
         torch.from_numpy(offsets),
+        [str(name) for name in bvh.data["names"]],
     )
 
 

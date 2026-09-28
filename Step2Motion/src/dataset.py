@@ -1,8 +1,15 @@
+from __future__ import annotations
 import torch
-import pymotion.rotations.quat_torch as quat
 from typing import Tuple
 from torch.utils.data import Dataset, DataLoader
-from pymotion.ops.skeleton_torch import fk
+from bvh_export import joint_names_for_count
+
+try:
+    import pymotion.rotations.quat_torch as quat
+    from pymotion.ops.skeleton_torch import fk
+except Exception:  # pragma: no cover - optional at load time
+    quat = None
+    fk = None
 
 
 class MotionDataset(Dataset):
@@ -41,6 +48,7 @@ class MotionDataset(Dataset):
         self.insole = insole.float()
         self.parents = parents
         self.offsets = offsets
+        self.joint_names = joint_names_for_count(int(parents.shape[0]))
         self.quats = quats
         self.is_acceleration_world = is_acceleration_world
         self.quat_lIMU = None  # stored for visualization
@@ -219,17 +227,59 @@ class MotionDataset(Dataset):
             self.parents,
         )
 
+    def n_clips(self) -> int:
+        return len(self.clips) - 1
+
+    def clip_name(self, clip: int) -> str:
+        session_ids = getattr(self, "session_ids", None)
+        if not session_ids:
+            return "c%d" % clip
+        session_id = str(session_ids[clip])
+        n_session = 1
+        if getattr(self, "n_session_clips", None):
+            n_session = int(self.n_session_clips[clip])
+        index = 0
+        if getattr(self, "clip_indices", None):
+            index = int(self.clip_indices[clip])
+        if n_session <= 1:
+            return session_id
+        return "%s_c%d" % (session_id, index)
+
+    def isolate_clip(self, clip: int):
+        import copy
+
+        out = copy.copy(self)
+        out.clips = list(self.clips)
+        out.set_clip(clip)
+        return out
+
     def set_clip(self, clip: int) -> None:
         self.poses = self.poses[clip : clip + 1]
         self.insole = self.insole[clip : clip + 1]
-        if hasattr(self, "left_acceleration_local"):
+        if hasattr(self, "left_acceleration_local") and self.left_acceleration_local is not None:
             self.left_acceleration_local = self.left_acceleration_local[clip : clip + 1]
             self.right_acceleration_local = self.right_acceleration_local[clip : clip + 1]
         self.quat_lIMU = self.quat_lIMU[clip : clip + 1] if self.quat_lIMU is not None else None
         self.quat_rIMU = self.quat_rIMU[clip : clip + 1] if self.quat_rIMU is not None else None
+        if getattr(self, "quats", None) is not None:
+            self.quats = self.quats[clip : clip + 1]
+        if getattr(self, "offsets", None) is not None and len(self.offsets) > 1:
+            self.offsets = self.offsets[clip : clip + 1]
+        if getattr(self, "distances", None) is not None and len(self.distances) > 1:
+            self.distances = self.distances[clip : clip + 1]
+        if getattr(self, "session_ids", None):
+            self.session_ids = self.session_ids[clip : clip + 1]
+        if getattr(self, "clip_indices", None):
+            self.clip_indices = self.clip_indices[clip : clip + 1]
+        if getattr(self, "n_session_clips", None):
+            self.n_session_clips = self.n_session_clips[clip : clip + 1]
+        for attribute in ("raw_bvh_paths", "raw_start_times", "raw_end_times"):
+            values = getattr(self, attribute, None)
+            if values:
+                setattr(self, attribute, values[clip : clip + 1])
         start_clip = self.clips[clip]
         end_clip = self.clips[clip + 1]
-        self.clips = self.clips[clip : clip + 2]
+        self.clips = list(self.clips[clip : clip + 2])
         self.clips[0] -= start_clip
         self.clips[1] -= start_clip
         self.n_poses = end_clip - start_clip
@@ -256,6 +306,12 @@ class MotionDataset(Dataset):
         self.up_rfoot_local = self.up_rfoot_local.to(device)
         self.forward_rfoot_local = self.forward_rfoot_local.to(device)
         self.initial_global_rot = self.initial_global_rot.to(device)
+        if getattr(self, "left_acceleration_local", None) is not None:
+            self.left_acceleration_local = [x.to(device) for x in self.left_acceleration_local]
+            self.right_acceleration_local = [x.to(device) for x in self.right_acceleration_local]
+        if getattr(self, "quat_lIMU", None) is not None:
+            self.quat_lIMU = [x.to(device) for x in self.quat_lIMU]
+            self.quat_rIMU = [x.to(device) for x in self.quat_rIMU]
         return self
 
     def to_dataloader(self, batch_size: int, shuffle: bool = True) -> DataLoader:

@@ -1,3 +1,4 @@
+from __future__ import annotations
 import torch
 import torch.nn as nn
 from typing import Optional
@@ -77,6 +78,10 @@ class ControlTransformer(nn.Module):
         n_heads: int,
         d_ff: int,
         dropout: float,
+        # --no-imu: the 38-dim insole (pressure16 + force1 + cop2 per foot)
+        # has no acc/gyro channels; the two IMU condition embeddings and
+        # their attention streams are deleted entirely.
+        imu_available: bool = True,
     ) -> None:
         super(ControlTransformer, self).__init__()
 
@@ -85,6 +90,8 @@ class ControlTransformer(nn.Module):
         self.pose_dim = output_dim - self.translation_dim
         self.distances_dim = self.pose_dim // 3
         self.c_dim = c_dim
+        self.imu_available = imu_available
+        n_streams = 8 if imu_available else 6
         d_model = hidden_dim
 
         self.temporal_pe = SinusoidalPositionalEncoding(max_length=input_T, d_model=d_model)
@@ -109,7 +116,7 @@ class ControlTransformer(nn.Module):
             nn.Linear(d_model, d_model),
             nn.GELU(),
             nn.Linear(d_model, d_model),
-        )
+        ) if imu_available else None
         self.condition_emb_lothers = nn.Sequential(
             nn.Linear(3, d_model),
             nn.GELU(),
@@ -137,7 +144,7 @@ class ControlTransformer(nn.Module):
             nn.Linear(d_model, d_model),
             nn.GELU(),
             nn.Linear(d_model, d_model),
-        )
+        ) if imu_available else None
         self.condition_emb_rothers = nn.Sequential(
             nn.Linear(3, d_model),
             nn.GELU(),
@@ -154,7 +161,10 @@ class ControlTransformer(nn.Module):
         # )
         self.decoder_layers = nn.ModuleList(
             [
-                ControlTransformerDecoderLayer(d_model, n_heads, dropout, batch_first=True, activation="gelu")
+                ControlTransformerDecoderLayer(
+                    d_model, n_heads, dropout, batch_first=True, activation="gelu",
+                    n_cond_streams=n_streams,
+                )
                 for _ in range(n_hidden)
             ]
         )
@@ -171,40 +181,50 @@ class ControlTransformer(nn.Module):
         :return: output tensor of shape (batch_size, T, hidden_dim)
         """
         temporality = c.shape[1]
+        mask = c_mask.unsqueeze(-1).unsqueeze(-1)
 
-        c_lpressure_toes = self.condition_emb_lpressure_toes(c[..., 8:16]) * c_mask.unsqueeze(-1).unsqueeze(
-            -1
-        )
-        c_lpressure_heel = self.condition_emb_lpressure_heel(c[..., 0:8]) * c_mask.unsqueeze(-1).unsqueeze(-1)
-        c_limu = self.condition_emb_limu(c[..., 16:22]) * c_mask.unsqueeze(-1).unsqueeze(-1)
-        c_lothers = self.condition_emb_lothers(c[..., 22:25]) * c_mask.unsqueeze(-1).unsqueeze(-1)
-        c_rpressure_toes = self.condition_emb_rpressure_toes(c[..., 33:41]) * c_mask.unsqueeze(-1).unsqueeze(
-            -1
-        )
-        c_rpressure_heel = self.condition_emb_rpressure_heel(c[..., 25:33]) * c_mask.unsqueeze(-1).unsqueeze(
-            -1
-        )
-        c_rimu = self.condition_emb_rimu(c[..., 41:47]) * c_mask.unsqueeze(-1).unsqueeze(-1)
-        c_rothers = self.condition_emb_rothers(c[..., 47:50]) * c_mask.unsqueeze(-1).unsqueeze(-1)
+        c_lpressure_toes = self.condition_emb_lpressure_toes(c[..., 8:16]) * mask
+        c_lpressure_heel = self.condition_emb_lpressure_heel(c[..., 0:8]) * mask
+        c_lothers = self.condition_emb_lothers(
+            c[..., 22:25] if self.imu_available else c[..., 16:19]
+        ) * mask
+        c_rpressure_toes = self.condition_emb_rpressure_toes(
+            c[..., 33:41] if self.imu_available else c[..., 27:35]
+        ) * mask
+        c_rpressure_heel = self.condition_emb_rpressure_heel(
+            c[..., 25:33] if self.imu_available else c[..., 19:27]
+        ) * mask
+        c_rothers = self.condition_emb_rothers(
+            c[..., 47:50] if self.imu_available else c[..., 35:38]
+        ) * mask
 
-        c_lpressure_toes = c_lpressure_toes + self.temporal_pe.forward_temporality(temporality)
-        c_lpressure_heel = c_lpressure_heel + self.temporal_pe.forward_temporality(temporality)
-        c_limu = c_limu + self.temporal_pe.forward_temporality(temporality)
-        c_lothers = c_lothers + self.temporal_pe.forward_temporality(temporality)
-        c_rpressure_toes = c_rpressure_toes + self.temporal_pe.forward_temporality(temporality)
-        c_rpressure_heel = c_rpressure_heel + self.temporal_pe.forward_temporality(temporality)
-        c_rimu = c_rimu + self.temporal_pe.forward_temporality(temporality)
-        c_rothers = c_rothers + self.temporal_pe.forward_temporality(temporality)
-        return [
+        streams = [
             c_lpressure_toes,
             c_lpressure_heel,
-            c_limu,
             c_lothers,
             c_rpressure_toes,
             c_rpressure_heel,
-            c_rimu,
             c_rothers,
         ]
+        if self.imu_available:
+            c_limu = self.condition_emb_limu(c[..., 16:22]) * mask
+            c_rimu = self.condition_emb_rimu(c[..., 41:47]) * mask
+            # Original 8-stream order (l_toes, l_heel, l_imu, l_others,
+            # r_toes, r_heel, r_imu, r_others).
+            streams = [
+                c_lpressure_toes,
+                c_lpressure_heel,
+                c_limu,
+                c_lothers,
+                c_rpressure_toes,
+                c_rpressure_heel,
+                c_rimu,
+                c_rothers,
+            ]
+
+        for stream in streams:
+            stream.add_(self.temporal_pe.forward_temporality(temporality))
+        return streams
 
     def forward_decoder_layer(
         self, x: torch.Tensor, c_emb: list[torch.Tensor], layer: int, test: bool = False

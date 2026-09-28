@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -127,6 +128,11 @@ def test(
         model_trans.eval()
     T = forward_diffusion.T
     half_temporal_stride = config["input_T"] // 2
+    # The diffusion model predicts pose channels only; translation occupies
+    # the first three channels of the dataset's output dimension.  Keep this
+    # derived from the config because gait uses 66 pose channels (69 total),
+    # while the original Step2Motion data used a different skeleton width.
+    pose_dim = int(config["output_dim"]) - 3
     indices = torch.arange(
         start=0, end=len(test_dataset) - half_temporal_stride, step=half_temporal_stride, device=device
     )
@@ -159,10 +165,10 @@ def test(
         ts = torch.empty((1,), device=device).int()
 
         if prev_x_t is None:
-            prev_x_t = torch.empty((T, 1, half_temporal_stride, 63), device=device)
+            prev_x_t = torch.empty((T, 1, half_temporal_stride, pose_dim), device=device)
 
         # Predict Pose ---------------------------------
-        x_t = torch.randn(c.shape[:-1] + (63,), device=device)
+        x_t = torch.randn(c.shape[:-1] + (pose_dim,), device=device)
         cmask_ones = torch.ones(1, device=device)
         for t in range(T, 0, -1):  # t in [T, 1]
             ts[:] = t
@@ -208,6 +214,12 @@ def test(
         prediction_trans = torch.zeros(c.shape[:-1] + (3,), device=device)
         if model_trans is not None:
             prediction_trans = prediction_trans + model_trans(x_t, c)
+        else:
+            # --no-imu ablation: the translation model's sole condition is the
+            # deleted IMU channels, so it is not trained. Fall back to the GT
+            # displacement for the exported BVH root (pose metrics are
+            # root-relative and unaffected; mrpe is reported as None).
+            prediction_trans = prediction_trans + x_0[..., :3]
 
         # Loss
         if isinstance(test_dataset, MotionDataset):

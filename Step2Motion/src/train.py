@@ -1,3 +1,5 @@
+from __future__ import annotations
+import prefer_env_site  # noqa: F401  # must run before pymotion imports
 import os
 import argparse
 import torch
@@ -9,6 +11,7 @@ from config import Config, PredictionMode, copy_config, load_config
 from torch.utils.data import DataLoader
 from dataset import MotionDataset
 from normalizer import Normalizer
+from workspace import normalizer_path
 from utils import data_augmentation
 from losses import PoseLoss, TranslationLoss
 from backward_diffusion import ControlTransformer, PriorTransformer, TransformerTranslation, model_from_config
@@ -149,7 +152,7 @@ def main(config: Config, train_only_translation: bool) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     normalizer: Normalizer = torch.load(
-        f"./configs/normalizer_{config['normalizer']}.pth",
+        normalizer_path(config),
         weights_only=False,
     )
     normalizer.to(device)
@@ -174,24 +177,29 @@ def main(config: Config, train_only_translation: bool) -> None:
     bw_diff_pose_prior, _ = model_from_config(config, is_prior=True)
     bw_diff_pose_prior.to(device)
     bw_diff_pose, model_trans = model_from_config(config, is_prior=False)
-    assert model_trans is not None
+    # --no-imu configs set "train_translation": false; the translation model
+    # is then None (its sole condition is the deleted IMU channels).
     bw_diff_pose.to(device)
-    model_trans.to(device)
+    if model_trans is not None:
+        model_trans.to(device)
 
     if bw_diff_pose_prior.normalizer_id.item() == 0:
         bw_diff_pose_prior.set_normalizer_id(normalizer.id)
     assert bw_diff_pose_prior.normalizer_id.item() == normalizer.id
     if bw_diff_pose.normalizer_id.item() == 0:
         bw_diff_pose.set_normalizer_id(normalizer.id)
-    if model_trans.normalizer_id.item() == 0:
+    if model_trans is not None and model_trans.normalizer_id.item() == 0:
         model_trans.set_normalizer_id(normalizer.id)
     assert bw_diff_pose.normalizer_id.item() == normalizer.id
-    assert model_trans.normalizer_id.item() == normalizer.id
+    if model_trans is not None:
+        assert model_trans.normalizer_id.item() == normalizer.id
 
     pose_prior_params = {sum(p.numel() for p in bw_diff_pose_prior.parameters())}
     print("Prior pose model parameters: ", pose_prior_params)
     pose_params = {sum(p.numel() for p in bw_diff_pose.parameters())}
-    trans_params = {sum(p.numel() for p in model_trans.parameters())}
+    trans_params = (
+        {sum(p.numel() for p in model_trans.parameters())} if model_trans is not None else None
+    )
     print("Pose model parameters: ", pose_params)
     print("Translation model parameters: ", trans_params)
 
@@ -199,14 +207,17 @@ def main(config: Config, train_only_translation: bool) -> None:
     # optimize both bw_diff_pose_prior and bw_diff_pose
     pose_params = list(bw_diff_pose_prior.parameters()) + list(bw_diff_pose.parameters())
     optimizer_pose = torch.optim.Adam(pose_params, lr=lr)  # type: ignore
-    optimizer_trans = torch.optim.Adam(model_trans.parameters(), lr=lr)  # type: ignore
+    optimizer_trans = (
+        torch.optim.Adam(model_trans.parameters(), lr=lr) if model_trans is not None else None
+    )
     loss_fn = PoseLoss(device)
     loss_fn_trans = TranslationLoss()
 
     print("Training the model -----------------")
     assert isinstance(bw_diff_pose_prior, PriorTransformer)
     assert isinstance(bw_diff_pose, ControlTransformer)
-    assert isinstance(model_trans, TransformerTranslation)
+    if model_trans is not None:
+        assert isinstance(model_trans, TransformerTranslation)
     train(
         train_loader,
         train_dataset,
@@ -237,10 +248,45 @@ if __name__ == "__main__":
     parser.add_argument(
         "--only_translation", action="store_true", help="Train only the translation model", default=False
     )
+    parser.add_argument(
+        "--no-imu",
+        action="store_true",
+        help="Train the no-IMU variant: 38-dim insole (IMU channels deleted at "
+        "build time, see AnysoleWorkspace/tool/adapters/Step2Motion/build_gait.py "
+        "--no-imu), IMU condition embeddings removed, translation model skipped. "
+        "Rewrites the config to the gait_noimu dataset/normalizer/model name; "
+        "the rewritten config is saved into the model dir, so test.py needs no "
+        "extra flag.",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     config = load_config(args.config)
+
+    if args.no_imu:
+        # --no-imu: point the config at the 38-dim gait_noimu artifacts
+        # (build_gait.py --no-imu writes gait_noimu/gait_*.pt — same
+        # filenames as the IMU export, different directory; the matching
+        # normalizer is normalizer_gait_noimu.pth) and switch the model to
+        # the IMU-deleted architecture. Applied before copy_config so the
+        # saved config already describes the no-IMU run.
+        def _switch_to_noimu(path: str) -> str:
+            return path.replace("/gait/gait_", "/gait_noimu/gait_")
+
+        for key in ("prior_train_data", "prior_val_data", "prior_test_data",
+                    "train_data", "val_data", "test_data"):
+            config[key] = _switch_to_noimu(config[key])
+        if not config["normalizer"].endswith("_noimu"):
+            config["normalizer"] = config["normalizer"] + "_noimu"
+        if not config["name"].endswith("_noimu"):
+            config["name"] = config["name"] + "_noimu"
+        config["input_dim"] = 38
+        config["imu_available"] = False
+        config["train_translation"] = False
+        print(
+            "--no-imu: input_dim=38, imu_available=False, train_translation=False, "
+            "normalizer=%s, train_data=%s" % (config["normalizer"], config["train_data"])
+        )
 
     config["verbose"] = args.verbose
 
