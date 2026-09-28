@@ -1,0 +1,24 @@
+# Flags for data set and data dirs
+dataset: '20230422' # 20230611
+basdir: ' '
+sub_ids: 'S01' # S01
+init_data_dir: ' '
+seq_name: 'MoCap_20230422_093331' # S1-A-TIAOYUAN-1
+essential_root: ' '
+# output_dir: '/data/yuanhaolei/PressureDataset_annotations'
+output_dir: 'outputs/'
+color_size:
+  - 1280
+  - 720
+depth_size:
+  - 640
+  - 576
+
+
+model_gender: 'male' # teenager is male, others follow facts
+
+fitting_stage: 'tracking' # init_shape, init_pose, tracking
+
+start_idx: 23
+end_idx: 24  # [)
+maxiters: 101
