@@ -1,25 +1,33 @@
 name: imagepressure2smpl
 loss_name: init
 
-gpu: 0,1,2,3
+gpu: 0
 
-train_data_dir: /data1/shenghao/MotionPRO/
-eval_data_dir: /data1/shenghao/MotionPRO/0729/csy/
-smpl_mean_params: data/smpl/smpl_mean_params.npz
-smpl_model: data/smpl/SMPL_NEUTRAL.pkl
-output_dir: data/debug
+# MotionPRO-InsoleAdapted inputs live in model-input://MotionPRO/<adapter_version>/
+# and are produced by AnysoleWorkspace/tool/adapters/MotionPRO/adapter.py
+# (C2 full generation after the C1 audit confirmation).  contact.npy is the
+# MotionPRO-private four-level soft-f6 foot loss weight, not a public GT.
+train_data_dir: model-input://MotionPRO/adapter_v1/cam3
+eval_data_dir: model-input://MotionPRO/adapter_v1/cam3
+cam_id: 3
+seq_root: model-input://MotionPRO/adapter_v1/cam3
+split_csv: protocol://splits/default/splits.csv
+smpl_mean_params: asset://third_party/smpl/smpl_mean_params.npz
+smpl_model: asset://third_party/smpl/SMPL_NEUTRAL.pkl
+output_dir: results://MotionPRO/debug
 
-checkpoint_dir: /data1/shenghao/data/imagepressure2smpl/checkpoint
+checkpoint_dir: results://MotionPRO/checkpoints
 checkpoint_path: None
-result_dir: '/data1/shenghao/data/imagepressure2smpl/result'
+result_dir: results://MotionPRO/metrics
 
 epochs: 1000
-batch_size: 64
+batch_size: 16
 learning_rate: 0.00005
 train_continue: False
 scheduler_patience: 5
 
 window_length: 20
+eval_fps: 40
 
 lamda_theta: 1
 lamda_trans: 1

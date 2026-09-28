@@ -1,17 +1,27 @@
+import argparse
+import glob
+import os
+import os.path as osp
+import sys
+from collections import OrderedDict
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+os.chdir(REPO_ROOT)
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import cv2
 import numpy as np
-import glob
-import os.path as osp
-import os
-import torch
 import smplx
-device = torch.device("cuda:{}".format(0) if torch.cuda.is_available() else "cpu")
-
-from collections import OrderedDict
+import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from pathlib import Path
+
 from lib.model.cliff.cliff_hr48 import CLIFF as cliff_hr48
+from lib.util.workspace import WORKSPACE_ROOT, resolve_path, sequence_root
+
+device = torch.device("cuda:{}".format(0) if torch.cuda.is_available() else "cpu")
 
 CROP_IMG_HEIGHT = 256
 CROP_IMG_WIDTH = 192
@@ -150,6 +160,10 @@ class ImageDataset(Dataset):
         self.color_list.sort()
 
         bbox_path = osp.join(base_dir, 'bbox.npy')
+        if not osp.exists(bbox_path):
+            raise FileNotFoundError(
+                f"Missing {bbox_path}. Run `python -m lib.util.gen_bbox --cam-id <id>` from MotionPRO first."
+            )
         self.bbox = np.array(np.load(bbox_path))
         print(self.bbox.shape)
         
@@ -189,36 +203,57 @@ def strip_prefix_if_present(state_dict, prefix):
         stripped_state_dict[key.replace(prefix, "")] = value
     return stripped_state_dict
 
-if __name__ == "__main__":
-    base_dir = Path('/data1/shenghao/MotionPRO/')
-    sub_base_dirs = []
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate feature_hrnet.pth for MotionPRO sequences.")
+    parser.add_argument("--cam-id", type=int, default=3)
+    parser.add_argument("--seq-root", type=str, default=None, help="Override the centralized sequence root.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--skip-existing", action="store_true", help="Skip sessions with feature_hrnet.pth.")
+    mode.add_argument("--force", action="store_true", help="Recompute and overwrite feature_hrnet.pth.")
+    return parser.parse_args()
 
-    # 遍历第一级
-    for first_level in base_dir.iterdir():
-        if first_level.is_dir():
-            # 遍历第二级
-            for second_level in first_level.iterdir():
-                if second_level.is_dir():
-                    sub_base_dirs.append(second_level)              
+
+def resolve_seq_root(args):
+    if args.seq_root:
+        return Path(resolve_path(args.seq_root, REPO_ROOT))
+    return sequence_root(args.cam_id)
+
+
+def list_subject_dirs(seq_root: Path):
+    if not seq_root.is_dir():
+        raise FileNotFoundError(f"No sequences under {seq_root}")
+    subject_dirs = []
+    for date_dir in sorted(path for path in seq_root.iterdir() if path.is_dir()):
+        for subject_dir in sorted(path for path in date_dir.iterdir() if path.is_dir()):
+            subject_dirs.append(subject_dir)
+    if not subject_dirs:
+        raise FileNotFoundError(f"No sequences under {seq_root}")
+    return subject_dirs
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    base_dir = resolve_seq_root(args)
+    sub_base_dirs = list_subject_dirs(base_dir)
 
     for sub_base_dir in tqdm(sub_base_dirs):
         basedir_list = os.listdir(sub_base_dir)
         basedir_list.sort()
         print(basedir_list)
 
-        cliff_model = torch.nn.DataParallel(cliff_hr48(smpl_mean_params='data/smpl/smpl_mean_params.npz')).to(device)
-        state_dict = torch.load('data/cliff_ckpt/hr48-PA43.0_MJE69.0_MVE81.2_3dpw.pt')['model']
+        cliff_model = torch.nn.DataParallel(cliff_hr48(smpl_mean_params=WORKSPACE_ROOT / 'assets/third_party/smpl/smpl_mean_params.npz')).to(device)
+        state_dict = torch.load(WORKSPACE_ROOT / 'assets/third_party/MotionPRO/cliff_ckpt/hr48-PA43.0_MJE69.0_MVE81.2_3dpw.pt')['model']
         # state_dict = strip_prefix_if_present(state_dict, prefix="module.")
         cliff_model.load_state_dict(state_dict, strict=True)
         cliff_model.eval()
 
-        smpl_model = smplx.create('data/smpl/SMPL_NEUTRAL.pkl').to(device)
+        smpl_model = smplx.create(WORKSPACE_ROOT / 'assets/third_party/smpl/SMPL_NEUTRAL.pkl').to(device)
 
         for basedir in tqdm(basedir_list):
-            basedir = osp.join(sub_base_dir, basedir)
+            basedir = osp.join(str(sub_base_dir), basedir)
             print(basedir)
             output_path = osp.join(basedir, 'feature_hrnet.pth')
-            if osp.exists(output_path):
+            if osp.exists(output_path) and not args.force:
                 continue
             data_loader = torch.utils.data.DataLoader(ImageDataset(basedir), batch_size=1024, shuffle=False, num_workers=8)
 

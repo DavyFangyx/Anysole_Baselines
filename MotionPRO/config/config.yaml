@@ -1,8 +1,12 @@
 defaults:
     - _self_
     - task: imagepressure2smpl
+
+wandb_mode: disabled
+wandb_project: MotionPRO
+wandb_entity: davyfangyuxuan-nanjing-university-of-aeronautics-and-ast
     
 # hydra parameters
 hydra:
   run:
-    dir: log/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: ${oc.env:ANYSOLE_RESULTS,../../results}/MotionPRO/logs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}

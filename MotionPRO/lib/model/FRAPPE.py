@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import torchvision
 
 from lib.util.geometry import rotation_matrix_to_angle_axis, rot6d_to_rotmat
+from lib.util.workspace import WORKSPACE_ROOT
 
 class TemporalEncoder(nn.Module):
     def __init__(
@@ -62,7 +63,7 @@ class Regressor(nn.Module):
         nn.init.xavier_uniform_(self.decpose.weight, gain=0.01)
         nn.init.xavier_uniform_(self.decshape.weight, gain=0.01)
 
-        mean_params = np.load('data/smpl/smpl_mean_params.npz')
+        mean_params = np.load(WORKSPACE_ROOT / 'assets/third_party/smpl/smpl_mean_params.npz')
         init_pose = torch.from_numpy(mean_params['pose'][:]).unsqueeze(0)
         init_shape = torch.from_numpy(mean_params['shape'][:].astype('float32')).unsqueeze(0)
         init_cam = torch.from_numpy(mean_params['cam']).unsqueeze(0)
@@ -163,13 +164,17 @@ class FRAPPE(nn.Module):
         pressure_feature = self.gru(pressure_feature)
         
         pressure_feature = pressure_feature + res_pressure
-        img_feature = img_feature + res_img
-
         res_img = img_feature
         res_pressure = pressure_feature
 
-        img_feature,_ = self.self_attention(img_feature, img_feature, img_feature)
-        pressure_feature,_ = self.self_attention(pressure_feature, pressure_feature, pressure_feature)
+        # nn.MultiheadAttention defaults to (L, N, E). Features are (B, T, E),
+        # so permute to attend over time, then permute back.
+        img_feature = img_feature.permute(1, 0, 2)
+        pressure_feature = pressure_feature.permute(1, 0, 2)
+        img_feature, _ = self.self_attention(img_feature, img_feature, img_feature)
+        pressure_feature, _ = self.self_attention(pressure_feature, pressure_feature, pressure_feature)
+        img_feature = img_feature.permute(1, 0, 2)
+        pressure_feature = pressure_feature.permute(1, 0, 2)
         
         img_feature = img_feature + res_img
         pressure_feature = pressure_feature + res_pressure
@@ -178,7 +183,10 @@ class FRAPPE(nn.Module):
         res_pressure = pressure_feature
         res_pressure_sa = pressure_feature
 
-        fusion_feature,_ = self.cross_attention(pressure_feature, img_feature, img_feature)
+        pressure_q = pressure_feature.permute(1, 0, 2)
+        img_kv = img_feature.permute(1, 0, 2)
+        fusion_feature, _ = self.cross_attention(pressure_q, img_kv, img_kv)
+        fusion_feature = fusion_feature.permute(1, 0, 2)
         fusion_feature = fusion_feature + res_img + res_pressure
         fusion_feature = self.ffn(fusion_feature)
 
