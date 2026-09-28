@@ -50,7 +50,7 @@
 | D3 | 40Hz 为交付帧率；PoseTransOpt 重力 dt→1/fps，其余基线帧基仅登记 | 选项 A | bf26a98 |
 | D4 | raw 按原样交付（SMPL y-up/m、BVH cm）；z-up/m 转换归各 adapter | 修正后成立 | — |
 | D5 | valid/fake 双时钟作为 raw 元数据统一交付，各 adapter 自处理并登记 | 选项 A | — |
-| D6 | 相机标定统一交付 = protocol/calibration/<date>.json（外部只读）；adapter 换算原生三件套 | 选项 A | 5e31c52 |
-| D7 | 触觉 raw 协议 = 左/右 PressureWasher CSV（48 数值列 = 4×12/脚、t_us、valid_mask/fake、final_fake_marked 来源） | 选项 A（不改码） | — |
+| D6 | 相机标定统一交付 = protocol/calibration/<date>.json（外部只读）；adapter 换算原生三件套；focal 按日期取 cam3 真实 fx（join_manifest camera 块，yaml 值仅默认回退） | 选项 A | 5e31c52 |
+| D7 | 触觉 raw 协议 = 左/右 PressureWasher CSV（48 数值列 = 4×12/脚、t_us、valid_mask/fake、final_fake_marked 来源）；量程（满量程/增益）无记录，契约事实 | 选项 A（不改码） | — |
 
 数据层偏离 #0/#1（上游数据集移出）保持不变。
