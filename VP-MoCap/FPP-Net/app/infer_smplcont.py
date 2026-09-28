@@ -19,11 +19,20 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str)
     parser.add_argument('--phase', choices=('train', 'val', 'test'), default='test')
     parser.add_argument('--num_threads', type=int, default=0)
-    parser.add_argument('--batch_size', default=1,type=int)
+    parser.add_argument('--batch_size', default=32, type=int,
+                        help='M12: batch inference (7.0x end-to-end with '
+                             '--num_threads 4). Use 1 for the native '
+                             'per-sample path.')
     parser.add_argument('--max_batches', type=int, default=0,
                         help='CPU/debug smoke limit; 0 means the complete split')
     parser.add_argument('--no_visualization', action='store_true',
                         help='skip per-frame PNG and only export the prediction sidecars')
+    parser.add_argument('--allow_tf32', action='store_true',
+                        help='M12: keep cuDNN TF32 (native path semantics). '
+                             'Batch inference disables TF32 by default to keep '
+                             'the batch/per-sample residual <=2.4e-7; the native '
+                             'per-sample path may pass this flag to reproduce '
+                             'upstream numbers.')
     parser.add_argument('--gpus', type=str, default='cpu', help='gpu ids: e.g. 0  0,1,2, 0,2, -1 for CPU mode')
     arg = parser.parse_args()
 
@@ -42,6 +51,13 @@ if __name__ == '__main__':
     # under the original frame names.
     cfg.dataset.aug.is_aug = False
     cfg.freeze()
+    if not arg.allow_tf32:
+        # M12: cuDNN picks different TF32 kernels/accumulation order per batch
+        # size, which moves the batch-vs-per-sample residual from <=2.4e-7 up
+        # to 2.2e-4.  Batch inference therefore disables TF32; the native
+        # per-sample path keeps the PyTorch default via --allow_tf32.
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cuda.matmul.allow_tf32 = False
     ic(cfg)
 
     if not os.path.isfile(cfg.load_net_checkpoint):
