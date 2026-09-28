@@ -1,8 +1,8 @@
 name: 'tempKPSMPL_series5_mlp'
-logdir: 'log/tempKPSMPL_series5_mlp'
-load_net_checkpoint: 'checkpoints/tempKPSMPL_series5_mlp/latest'
-checkpoint_path: 'checkpoints'
-result_path: 'results'
+logdir: 'results://baselines/FPP-Net/logs'
+load_net_checkpoint: 'results://baselines/FPP-Net/checkpoints/tempKPSMPL_series5_mlp/latest'
+checkpoint_path: 'results://baselines/FPP-Net/checkpoints'
+result_path: 'results://baselines/FPP-Net/metrics'
 
 trainer:
   lr: 1e-4
@@ -16,8 +16,16 @@ trainer:
 dataset:
   module: 'lib.Dataset.PressDataset.PED_tempKPCont'
   path: 'lib/Dataset/PressDataset/PED_tempKPCont.py'
-  datadir: '/data1/shenghao/Tebu/MMVP_keypoints'
-  tv_fn: 'essentials/dataset_split_temporal5.npy'
+  datadir: 'model-input://FPP-Net/adapter_v1'
+  tv_fn: 'model-input://FPP-Net/adapter_v1/dataset_split_temporal5.npy'
+  # 31x11 insole: the single public MMVP representation produced by the merged
+  # mmvp_series adapter (insole_31x11).  FPP-Net reads it read-only and never
+  # materialises a private second tree.
+  tactile_root: 'shared://representations/tactile/mmvp_31x11/v1'
+  # per-frame pred_contact_smpl sidecars (with frame ids) land under the
+  # canonical VP-MoCap work root, consumed by the PoseTransOpt adapter.
+  prediction_root: 'work://VP-MoCap/v1/fpp_predictions'
+  essentials_root: 'Baselines/VP-MoCap/FPP-Net/essentials'
   img_res: 224
   serial_batches: False
   pin_memory: True

@@ -19,6 +19,17 @@ if __name__ == '__main__':
     parser.add_argument('--num_threads', type=int)
     parser.add_argument('--batch_size', type=int)
     parser.add_argument('--gpus', type=str, default='cpu', help='gpu ids: e.g. 0  0,1,2, 0,2, -1 for CPU mode')
+    parser.add_argument('--epochs', type=int, default=None,
+                        help='override total epochs (default: config value)')
+    parser.add_argument('--early-stop-patience', type=int, default=None,
+                        help='stop after N epochs without improvement > '
+                        'min-delta (default: config value; 0 disables)')
+    parser.add_argument('--early-stop-min-delta', type=float, default=None,
+                        help='loss improvement threshold (default: config value)')
+    parser.add_argument('--early-stop-lr-floor', type=float, default=None,
+                        help='stop once LR decays below this (default: config value)')
+    parser.add_argument('--no-early-stop', action='store_true',
+                        help='disable early stopping entirely')
     arg = parser.parse_args()
 
     cfg = config()
@@ -28,6 +39,18 @@ if __name__ == '__main__':
     cfg.num_threads = arg.num_threads
     cfg.gpus = arg.gpus
     cfg.batch_size = arg.batch_size
+    if arg.epochs is not None:
+        cfg.trainer.epochs = arg.epochs
+    if arg.no_early_stop:
+        cfg.trainer.early_stop_patience = 0
+        cfg.trainer.early_stop_lr_floor = 0.0
+    else:
+        if arg.early_stop_patience is not None:
+            cfg.trainer.early_stop_patience = arg.early_stop_patience
+        if arg.early_stop_min_delta is not None:
+            cfg.trainer.early_stop_min_delta = arg.early_stop_min_delta
+        if arg.early_stop_lr_floor is not None:
+            cfg.trainer.early_stop_lr_floor = arg.early_stop_lr_floor
     cfg.freeze()
     ic(cfg)
 

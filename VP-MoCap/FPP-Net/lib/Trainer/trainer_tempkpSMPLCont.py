@@ -21,6 +21,13 @@ class ContTrainer:
         self.w_press = opts.w_press
         self.w_cont = opts.w_cont
 
+        # Early stopping (opt-in via config; 0 disables). The loss curve of
+        # this trainer flattens long before the LR schedule ends, so the
+        # trailing epochs are ~zero-learning-rate iterations.
+        self.estop_patience = getattr(opts, 'early_stop_patience', 0)
+        self.estop_min_delta = getattr(opts, 'early_stop_min_delta', 0.0)
+        self.estop_lr_floor = getattr(opts, 'early_stop_lr_floor', 0.0)
+
     def adjust_learning_rate(self, optimizer, epoch):
         """
         Sets the learning rate to the initial LR decayed by x every y epochs
@@ -32,6 +39,8 @@ class ContTrainer:
 
     def train(self):
         self.recorder.init()
+        best_loss = None
+        patience_left = self.estop_patience
         for epoch in range(self.epochs):
             iter = 0
             loss_ls,loss_press_ls,loss_cont_ls = [],[],[]
@@ -46,8 +55,11 @@ class ContTrainer:
                 data.update({'pred_press': pred_press,'pred_cont':pred_cont})
 
                 loss_press = self.w_press*F.mse_loss(pred_press, data['insole'])
-                #loss_cont = self.w_cont*F.mse_loss(pred_cont, data['contact_smpl'])
-                loss_cont = self.w_cont*F.binary_cross_entropy(pred_cont, data['contact_label'])
+                # pred_cont is 2*96 SMPL-foot contact; contact_label is the
+                # 31x22 insole mask (484 valid pixels).  The upstream target
+                # caused a 192-vs-484 BCE shape mismatch.
+                loss_cont = self.w_cont * F.binary_cross_entropy(
+                    pred_cont, data['contact_smpl'])
 
                 loss = loss_press + loss_cont
 
@@ -76,3 +88,26 @@ class ContTrainer:
             print('Epoch[%d]: total loss[%f],pressure loss[%f], contact loss[%f]'%(
                 epoch,loss_mean,torch.mean(torch.tensor(loss_press_ls)),torch.mean(torch.tensor(loss_cont_ls))) )
             self.recorder.log(log)
+
+            # ---- early stopping (only when enabled in the config) ----
+            if self.estop_patience > 0:
+                if best_loss is None or loss_mean < best_loss - self.estop_min_delta:
+                    best_loss = loss_mean
+                    patience_left = self.estop_patience
+                    torch.save(self.model.state_dict(),
+                               '%s/%s/net_epoch_best' % (
+                                   self.recorder.checkpoint_path,
+                                   self.recorder.name))
+                else:
+                    patience_left -= 1
+                if patience_left <= 0:
+                    print('Early stop at epoch %d: no loss improvement for '
+                          '%d epochs (best %f)' % (
+                              epoch, self.estop_patience, best_loss))
+                    break
+                lr = self.init_lr * (0.1 ** (epoch // self.num_train_epochs))
+                if self.estop_lr_floor > 0 and lr < self.estop_lr_floor \
+                        and epoch >= self.num_train_epochs:
+                    print('Early stop at epoch %d: lr %g below floor %g' % (
+                        epoch, lr, self.estop_lr_floor))
+                    break

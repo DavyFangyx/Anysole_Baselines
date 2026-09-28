@@ -2,6 +2,7 @@ from tensorboardX import SummaryWriter
 import torch
 import numpy as np
 import trimesh
+from pathlib import Path
 
 
 class ContRecorder():
@@ -17,7 +18,8 @@ class ContRecorder():
         self.checkpoint_path = opt.checkpoint_path
         self.result_path = self.logdir
         self.name = opt.name
-        self.m_smpl = trimesh.load('../../bodyModels/smpl/smpl_uv/smpl_uv.obj',process=False)
+        essentials = Path(__file__).resolve().parents[2] / 'essentials'
+        self.m_smpl = trimesh.load(essentials / 'smpl_uv.obj', process=False)
 
     def init(self):
         self.iter = 0

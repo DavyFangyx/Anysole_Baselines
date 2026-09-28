@@ -2,25 +2,29 @@ import cv2
 import numpy as np
 import torch
 import trimesh
+from pathlib import Path
 
 
 class InsoleModule():
-    def __init__(self, basdir=None):
+    def __init__(self, basdir=None, essentials_root=None):
         self.basdir = basdir
+        repo_root = Path(__file__).resolve().parents[2]
+        essentials_root = Path(essentials_root) if essentials_root else repo_root / 'essentials'
+        insole_root = essentials_root / 'insole2cont'
         # self.maskL = np.loadtxt(osp.join(self.basdir,'insole_mask/insoleMaskL.txt')).astype(np.int32)
         # self.maskR = np.loadtxt(osp.join(self.basdir,'insole_mask/insoleMaskR.txt')).astype(np.int32)
-        self.maskL = np.loadtxt('essentials/insole2cont/insoleMaskL.txt').astype(np.int32)
-        self.maskR = np.loadtxt('essentials/insole2cont/insoleMaskR.txt').astype(np.int32)
+        self.maskL = np.loadtxt(insole_root / 'insoleMaskL.txt').astype(np.int32)
+        self.maskR = np.loadtxt(insole_root / 'insoleMaskR.txt').astype(np.int32)
         self.pixel_num = np.sum(self.maskL) + np.sum(self.maskR)
         self.maskImg = np.concatenate([self.maskL, self.maskR], axis=1) > 0.5
 
         # insole to smpl
-        self.insole2smplR = np.load('essentials/insole2cont/insole2smplR.npy', allow_pickle=True).item()
-        self.insole2smplL = np.load('essentials/insole2cont/insole2smplL.npy', allow_pickle=True).item()
-        self.footIdsL = np.loadtxt('essentials/insole2cont/footL_ids.txt').astype(np.int32)
-        self.footIdsR = np.loadtxt('essentials/insole2cont/footR_ids.txt').astype(np.int32)
+        self.insole2smplR = np.load(insole_root / 'insole2smplR.npy', allow_pickle=True).item()
+        self.insole2smplL = np.load(insole_root / 'insole2smplL.npy', allow_pickle=True).item()
+        self.footIdsL = np.loadtxt(insole_root / 'footL_ids.txt').astype(np.int32)
+        self.footIdsR = np.loadtxt(insole_root / 'footR_ids.txt').astype(np.int32)
 
-        model_temp = trimesh.load('essentials/insole2cont/smpl_template.obj', process=False)
+        model_temp = trimesh.load(insole_root / 'smpl_template.obj', process=False)
         self.v_template = np.array(model_temp.vertices)
         self.v_footL, self.v_footR = self.v_template[self.footIdsL, :], self.v_template[self.footIdsR, :]
         self.faces = np.array(model_temp.faces)
@@ -134,11 +138,16 @@ class InsoleModule():
         return contact_label
 
     # ===================== insole to smpl =====================
-    def getVertsPress(self, contact_label):
+    def getVertsPress(self, contact_label, soft=False):
         ''' vis pressure infered from pressureNet
             input:
                 contact_label: 2*31*11
-                    insole contact label
+                    insole contact label (binary grid, or per-cell soft
+                    values when ``soft`` is set)
+                soft: bool
+                    propagate per-cell label values without the final
+                    binarization: each vertex takes the mean over its
+                    assigned cells instead of their binary sum
             return
                 smpl_cont: 2*96
         '''
@@ -151,7 +160,7 @@ class InsoleModule():
                 tmp = self.insole2smplL[str(ids)]
                 _data = left_press[tmp[0], tmp[1]]
                 if _data.shape[0] != 0:
-                    left_smpl[i] = np.sum(_data, axis=0)
+                    left_smpl[i] = np.mean(_data) if soft else np.sum(_data, axis=0)
         # right
         right_press = contact_label[1]
         right_smpl = np.zeros([self.footIdsR.shape[0]], dtype=np.float32)
@@ -161,10 +170,11 @@ class InsoleModule():
                 tmp = self.insole2smplR[str(ids)]
                 _data = right_press[tmp[0], tmp[1]]
                 if _data.shape[0] != 0:
-                    right_smpl[i] = np.sum(_data, axis=0)
+                    right_smpl[i] = np.mean(_data) if soft else np.sum(_data, axis=0)
 
         smpl_cont = np.stack([left_smpl, right_smpl])
-        smpl_cont[smpl_cont > 0.5] = 1
+        if not soft:
+            smpl_cont[smpl_cont > 0.5] = 1
         return smpl_cont
 
     def visSMPLContImage(self, contact_label):

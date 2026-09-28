@@ -1,5 +1,33 @@
 import os
+import sys
+from pathlib import Path
 from yacs.config import CfgNode as CN
+
+
+REPO_ROOT = Path(__file__).resolve().parents[5]
+
+
+def resolve_workspace_path(value):
+    text = str(value or '')
+    if '://' in text:
+        # canonical workspace URIs (shared://, model-input://, work://) go
+        # through the single public resolver; the legacy roots below are
+        # resolved locally so a config can still be read without importing
+        # the workspace package.
+        if text.startswith(('shared://', 'model-input://', 'work://')):
+            if str(REPO_ROOT) not in sys.path:
+                sys.path.insert(0, str(REPO_ROOT))
+            from AnysoleWorkspace.tool.workspace import resolve_uri
+            return str(resolve_uri(text))
+    roots = {
+        'workspace://': Path(os.environ.get('ANYSOLE_WORKSPACE', REPO_ROOT / 'AnysoleWorkspace')),
+        'results://': Path(os.environ.get('ANYSOLE_RESULTS', REPO_ROOT / 'results')),
+        'display://': Path(os.environ.get('ANYSOLE_RESULTSDISPLAY', REPO_ROOT / 'results_display')),
+    }
+    for prefix, root in roots.items():
+        if text.startswith(prefix):
+            return str(root / text[len(prefix):])
+    return text
 
 
 class config_cont():
@@ -27,6 +55,9 @@ class config_cont():
         self.cfg.dataset.datadir = ''
         self.cfg.dataset.seq_name = ''
         self.cfg.dataset.tv_fn = ''
+        self.cfg.dataset.tactile_root = ''
+        self.cfg.dataset.prediction_root = ''
+        self.cfg.dataset.essentials_root = ''
         self.cfg.dataset.w_sc = 1.0
         # self.cfg.dataset.w_bsc = 1.0
         self.cfg.dataset.w_nc = 1.0
@@ -60,4 +91,12 @@ class config_cont():
     def load(self, config_file):
         self.cfg.defrost()
         self.cfg.merge_from_file(config_file)
+        for key in ('datadir', 'tv_fn', 'tactile_root', 'prediction_root', 'essentials_root'):
+            self.cfg.dataset[key] = resolve_workspace_path(self.cfg.dataset[key])
+        if self.cfg.dataset.essentials_root and not Path(self.cfg.dataset.essentials_root).is_absolute():
+            self.cfg.dataset.essentials_root = str(REPO_ROOT / self.cfg.dataset.essentials_root)
+        for key in ('load_net_checkpoint', 'checkpoint_path', 'result_path', 'logdir'):
+            value = str(self.cfg.get(key, ''))
+            if value.startswith(('workspace://', 'results://', 'display://')):
+                self.cfg[key] = resolve_workspace_path(value)
         self.cfg.freeze()
