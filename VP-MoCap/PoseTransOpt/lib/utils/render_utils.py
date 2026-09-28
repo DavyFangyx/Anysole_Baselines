@@ -8,6 +8,11 @@
 # PARTICULAR PURPOSE. See the MIT License for more details.
 
 import os
+# PoseTransOpt is normally run on a headless server.  Select EGL before
+# importing PyOpenGL/pyrender; this only changes the off-screen render
+# backend and does not change the optimization or model computation.
+if not os.environ.get('DISPLAY') and not os.environ.get('PYOPENGL_PLATFORM'):
+    os.environ['PYOPENGL_PLATFORM'] = 'egl'
 import trimesh
 
 import pyrender

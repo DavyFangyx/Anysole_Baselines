@@ -1,7 +1,7 @@
-subject: 'S10'
-scene_rgbd: 'D:/Dataset/test/MMVP/template_scene_rgbd.npy'
-input_path_base: 'D:/Dataset/test/MMVP'
-thres_contact : 15
+subject: ''
+scene_rgbd: ''
+input_path_base: ''
+thres_contact: 15
 
 image_width: 1624
 image_height: 1240
@@ -9,3 +9,6 @@ focal_length: 1394
 scale: 0.97
 depth_scale: 1.0
 fps: 40.0
+max_frames: 0
+output_path: ''
+write_visualization: true

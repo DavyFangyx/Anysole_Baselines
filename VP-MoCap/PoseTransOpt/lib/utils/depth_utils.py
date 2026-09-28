@@ -68,6 +68,16 @@ def calculateFloorNormal(point_cloud,xy, save_path=None):
 
     return floor_normal, floor_trans, depth2floor
 
+def _load_rgbd(path):
+    """Load the scene RGB-D template; accepts both the npz container and
+    the legacy pickled dict-in-npy form (cross-numpy-version compatible)."""
+    data = np.load(path, allow_pickle=False)
+    if hasattr(data, "files"):  # npz container
+        return np.asarray(data["rgb"]), np.asarray(data["depth"])
+    payload = np.load(path, allow_pickle=True).item()
+    return payload["rgb"], payload["depth"]
+
+
 def depth_to_pointcloud(depth_path,fx,fy, scale, cx, cy, save_path=None):
     """depth map to point cloud whose floor is on the XOZ plane
 
@@ -86,10 +96,9 @@ def depth_to_pointcloud(depth_path,fx,fy, scale, cx, cy, save_path=None):
     cx = int(cx)
     cy = int(cy)
     xy = [cy, cy*2, 0, cx*2]
-    # load depth npy file 
-    rgbd = np.load(depth_path,allow_pickle=True).item() # (720,1280)
-    rgb = rgbd['rgb']
-    depth = rgbd['depth'] * scale
+    # load depth npy file
+    rgb, depth = _load_rgbd(depth_path)
+    depth = np.asarray(depth) * scale
     point_cloud = depth2PointCloud(depth,fx,fy,cx,cy)  # (720,1280,3)
     floor_normal, floor_trans, depth2floor = calculateFloorNormal(point_cloud,xy,save_path)
     point_cloud_fil = np.dot(depth2floor[:3, :3], point_cloud.reshape([-1, 3]).T).T

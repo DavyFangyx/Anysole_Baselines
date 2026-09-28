@@ -2,7 +2,9 @@ method: 'optimize'
 pose_filter: True
 kp_filter: True
 kp_score: True
-smpl_file: 'models/SMPL_NEUTRAL.pkl'
+smpl_file: 'asset://third_party/smpl/SMPL_NEUTRAL.pkl'
+smpl_male_file: 'asset://third_party/VP-MoCap/smpl/SMPL_MALE.pkl'
+vposer_path: 'models/V02_05'
 
 max_iter: 2001
 lr: 0.01

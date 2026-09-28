@@ -33,7 +33,14 @@ class ParametricModel:
         self._J_regressor = torch.from_numpy(data['J_regressor'].toarray()).float().to(device)
         self._skinning_weights = torch.from_numpy(data['weights']).float().to(device)
         self._posedirs = torch.from_numpy(data['posedirs']).float().to(device)
-        self._shapedirs = torch.from_numpy(np.array(data['shapedirs'])).float().to(device)
+        # Official SMPL files may store 300 PCA shape bases, while the
+        # baseline interface supplies the standard 10-dimensional SMPL beta
+        # vector.  Keep the file unchanged and use the first 10 bases, as the
+        # standard SMPL implementations do.
+        shapedirs = np.asarray(data['shapedirs'])
+        if shapedirs.ndim != 3 or shapedirs.shape[-1] < 10:
+            raise ValueError('SMPL shapedirs must contain at least 10 bases, got {}'.format(shapedirs.shape))
+        self._shapedirs = torch.from_numpy(shapedirs[:, :, :10].copy()).float().to(device)
         self._v_template = torch.from_numpy(data['v_template']).float().to(device)
         self._J = torch.from_numpy(data['J']).float().to(device)
         self.face = data['f']

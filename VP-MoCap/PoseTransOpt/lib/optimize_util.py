@@ -1,5 +1,6 @@
 import torch
 import torchgeometry as tgm
+from scipy.spatial.transform import Rotation as SciRotation
 
 
 def perspective_projection(points, rotation, translation, focal_length,
@@ -36,10 +37,14 @@ def perspective_projection(points, rotation, translation, focal_length,
     return projected_points[:, :, :-1]
 
 def encode(pred_rotmat,vp,device):
-    rot_pad = torch.tensor([0, 0, 1], dtype=torch.float32, device=device).view(1, 3, 1)
-    rot_pad = rot_pad.expand(pred_rotmat.shape[0] * 24, -1, -1)
-    rotmat = torch.cat((pred_rotmat.view(-1, 3, 3), rot_pad), dim=-1)
-    pred_rotvec = tgm.rotation_matrix_to_angle_axis(rotmat).contiguous().view(-1, 72)  # N*72
+    # torchgeometry's legacy conversion uses bool subtraction and fails on
+    # torch 2.4. Encoding is an initialization-only conversion, so use the
+    # mathematically equivalent SciPy implementation without changing the
+    # optimization objective or the VPoser output.
+    rotvec = SciRotation.from_matrix(
+        pred_rotmat.detach().cpu().numpy().reshape(-1, 3, 3)
+    ).as_rotvec()
+    pred_rotvec = torch.from_numpy(rotvec).to(device=device, dtype=pred_rotmat.dtype).view(-1, 72)
     pred_rotvec_body = pred_rotvec[:,3:66]
 
     pred_body_poZ = vp.encode(pred_rotvec_body).mean

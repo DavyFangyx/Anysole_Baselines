@@ -2,9 +2,11 @@ import hydra
 import torch
 import numpy as np
 import copy
+import json
 import logging
 import os
 import os.path as osp
+from pathlib import Path
 from tqdm import tqdm
 
 from lib.dataset.dataset_mmvp import Dataset
@@ -21,14 +23,57 @@ from human_body_prior.models.vposer_model import VPoser
 
 log = logging.getLogger(__name__)
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+BASELINE_ROOT = Path(__file__).resolve().parents[1]
+import sys
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
+def resolve_path(value):
+    text = str(value or '')
+    if '://' in text and text.startswith(('shared://', 'model-input://', 'work://', 'asset://')):
+        from AnysoleWorkspace.tool.workspace import resolve_uri
+        return str(resolve_uri(text))
+    roots = {
+        'workspace://': Path(os.environ.get('ANYSOLE_WORKSPACE', REPO_ROOT / 'AnysoleWorkspace')),
+        'results://': Path(os.environ.get('ANYSOLE_RESULTS', REPO_ROOT / 'results')),
+        'display://': Path(os.environ.get('ANYSOLE_RESULTSDISPLAY', REPO_ROOT / 'results_display')),
+    }
+    for prefix, root in roots.items():
+        if text.startswith(prefix):
+            return str(root / text[len(prefix):])
+    if not text:
+        return text
+    path = Path(text)
+    return str(path if path.is_absolute() else BASELINE_ROOT / path)
+
+
+def resolve_cfg_paths(cfg):
+    for key in ('input_path_base', 'scene_rgbd'):
+        cfg['task'][key] = resolve_path(cfg['task'][key])
+    for key in ('smpl_file', 'smpl_male_file', 'vposer_path'):
+        cfg['method'][key] = resolve_path(cfg['method'][key])
+    return cfg
+
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg):
+    cfg = resolve_cfg_paths(cfg)
     device = torch.device('cuda:{}'.format(cfg['gpu'])) if torch.cuda.is_available() else torch.device('cpu')
     dtype = torch.float32
     task_cfg = cfg['task']
     method_cfg = cfg['method']
 
-    opt_result_path = osp.join(task_cfg['input_path_base'], 'opt_results')
+    configured_output = str(task_cfg.get('output_path', '') or '')
+    if configured_output:
+        opt_result_path = resolve_path(configured_output)
+    else:
+        # canonical work root: work://VP-MoCap/v1/pose_optimization/<date>/<subject>/<session>
+        session_parts = Path(task_cfg['input_path_base']).parts[-3:]
+        opt_result_path = str(
+            REPO_ROOT / 'AnysoleWorkspace' / 'work' / 'VP-MoCap' / 'v1'
+            / 'pose_optimization' / session_parts[0] / session_parts[1]
+            / session_parts[2])
     if not os.path.isdir(opt_result_path):
         os.makedirs(opt_result_path)
 
@@ -36,10 +81,11 @@ def main(cfg):
 
     camera = Camera(cfg, dtype=dtype, device=device)
     dataset = Dataset(cfg)
-    visualizer = Visualizer(cfg, opt_result_path)
+    write_visualization = bool(task_cfg.get('write_visualization', True))
+    visualizer = Visualizer(cfg, opt_result_path) if write_visualization else None
     renderer = Renderer(focal_length=camera.focal_length, img_w=camera.img_w, img_h=camera.img_h,
                             faces=smpl_model.faces, same_mesh_color=False,
-                            rotation=camera.rotation, translation=camera.translation)
+                            rotation=camera.rotation, translation=camera.translation) if write_visualization else None
 
     pose = torch.tensor(dataset.pose,dtype=dtype,device=device)
     betas = torch.tensor(dataset.betas,dtype=dtype,device=device)
@@ -51,7 +97,7 @@ def main(cfg):
 
     point_cloud = torch.tensor(dataset.point_cloud, dtype=dtype, device=device)
 
-    vp, ps = load_model('models/V02_05', model_code=VPoser,
+    vp, ps = load_model(cfg['method'].get('vposer_path', 'models/V02_05'), model_code=VPoser,
                         remove_words_in_model_weights='vp_model.',
                         disable_grad=True)
     vp = vp.to(device)
@@ -138,22 +184,37 @@ def main(cfg):
         'pose': pose_result,
         'beta': beta_result,
         'trans': trans_result,
+        # shared frame ids of the optimized (post-join, post-trim) frames
+        'frame_ids': np.asarray(dataset.frame_ids, dtype=np.int64),
     }
 
     hydra_path = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    
-    torch.save(save_result, osp.join(opt_result_path, "opt_result.pth"))
-    torch.save(save_result, osp.join(opt_result_path, "opt_result_" + hydra_path.split('\\')[-1].split('.')[0] + ".pth"))
 
-    for frame in tqdm(range(pose_result.shape[0])):
-        result = smpl_model(betas=beta_result[frame].unsqueeze(0).type(dtype).to(device),
-                            body_pose=pose_result[frame,1:].unsqueeze(0).type(dtype).to(device),
-                            global_orient=pose_result[frame,[0]].unsqueeze(0).type(dtype).to(device),
-                            pose2rot=False,
-                            transl=trans_result[frame].unsqueeze(0).type(dtype).to(device))
-    
-        visualizer.visual_smpl_2d_single(result.vertices, renderer, frame)
-        visualizer.save_o3d_mesh(result.vertices, smpl_model.faces, frame)
+    torch.save(save_result, osp.join(opt_result_path, "opt_result.pth"))
+    torch.save(save_result, osp.join(opt_result_path, "opt_result_" + Path(hydra_path).name.split('.')[0] + ".pth"))
+
+    with open(osp.join(opt_result_path, 'artifact.json'), 'w',
+              encoding='utf-8') as handle:
+        json.dump({
+            "schema_version": "posetransopt.result.v1",
+            "producer": "app.optimize",
+            "input_path_base": str(task_cfg['input_path_base']),
+            "frame_ids_min": int(min(dataset.frame_ids)),
+            "frame_ids_max": int(max(dataset.frame_ids)),
+            "frame_count": int(len(dataset.frame_ids)),
+            "segments": [[int(s), int(e)] for s, e in dataset.segments],
+        }, handle, ensure_ascii=False, indent=2)
+
+    if write_visualization:
+        for frame in tqdm(range(pose_result.shape[0])):
+            result = smpl_model(betas=beta_result[frame].unsqueeze(0).type(dtype).to(device),
+                                body_pose=pose_result[frame,1:].unsqueeze(0).type(dtype).to(device),
+                                global_orient=pose_result[frame,[0]].unsqueeze(0).type(dtype).to(device),
+                                pose2rot=False,
+                                transl=trans_result[frame].unsqueeze(0).type(dtype).to(device))
+
+            visualizer.visual_smpl_2d_single(result.vertices, renderer, frame)
+            visualizer.save_o3d_mesh(result.vertices, smpl_model.faces, frame)
 
 
 if __name__ == "__main__":

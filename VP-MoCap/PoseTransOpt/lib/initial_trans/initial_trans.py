@@ -17,7 +17,12 @@ def initial_trans(cfg, dataset):
     if not os.path.isdir(init_trans_path):
         os.makedirs(init_trans_path)
     
-    transolver = TranSolver(cfg, 'models/SMPL_MALE.pkl', floor=0.0, scale=cfg['task']['scale'], shape=dataset.betas)
+    transolver = TranSolver(
+        cfg,
+        cfg['method'].get('smpl_male_file', 'models/SMPL_MALE.pkl'),
+        floor=0.0,
+        scale=cfg['task']['scale'],
+        shape=dataset.betas)
 
     contact_change_idx_all = find_contact_change_idx(dataset.contact)
     point_cloud, rgb= depth_to_pointcloud(cfg['task']['scene_rgbd'],fx=cfg['task']['focal_length'], fy=cfg['task']['focal_length'], scale=cfg['task']['depth_scale'], cx=int(cfg['task']['image_width']/2), cy=int(cfg['task']['image_height']/2)) # 720,1280,3
