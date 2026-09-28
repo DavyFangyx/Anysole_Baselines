@@ -27,6 +27,7 @@ class SMPLMMVPOuput(ModelOutput):
     foot_plane: Optional[Tensor] = None
     model_scale_opt: Optional[Tensor] = None
     foot_ids: Optional[List] = None
+    smpl_joints: Optional[Tensor] = None
 
 
 class SMPL_MMVP(nn.Module):
@@ -264,6 +265,7 @@ class SMPL_MMVP(nn.Module):
         joints_54 += self.transl.unsqueeze(dim=1)
         return SMPLMMVPOuput(
             joints=joints_49,
+            smpl_joints=J_transformed + self.transl.unsqueeze(dim=1),
             vertices=verts,
             body_pose=self.body_pose,
             foot_plane=v_plane,

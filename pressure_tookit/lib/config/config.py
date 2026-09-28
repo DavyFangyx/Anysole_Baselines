@@ -45,7 +45,10 @@ def parse_config(argv=None):
         type=str,
         help='The name of the dataset that will be used')
     parser.add_argument(
-        '--basdir', default='E:/dataset', type=str, help='Base dir')
+        '--basdir',
+        default='model-input://pressure_toolkit/v1',
+        type=str,
+        help='Base dir (canonical model_inputs tree)')
     parser.add_argument(
         '--sub_ids', default='S01', type=str, help='Subject ids')
     parser.add_argument(
@@ -81,7 +84,10 @@ def parse_config(argv=None):
         type=int,
         nargs='*',
         help='frame range')
-    parser.add_argument('--essential_root', type=str, default=' ')
+    parser.add_argument(
+        '--essential_root',
+        type=str,
+        default='asset://third_party/pressure_toolkit/essential')
     parser.add_argument(
         '--model_gender',
         default='neutral',
@@ -145,6 +151,34 @@ def parse_config(argv=None):
         type=int,
         default=100,
         help='The maximum iterations for the optimization')
+    parser.add_argument(
+        '--save_corr_debug',
+        action='store_true',
+        help='Write correspondence OBJ debug files; disabled by default for speed')
+    parser.add_argument(
+        '--skip-mesh-export',
+        action='store_true',
+        help='Skip per-frame SMPL OBJ export; NPZ fitting results are unchanged')
+    parser.add_argument(
+        '--skip-gt-depth-export',
+        action='store_true',
+        help='Skip per-frame observed-depth OBJ export; NPZ fitting results are unchanged')
+    parser.add_argument(
+        '--no-export-obj',
+        action='store_true',
+        help='Skip both visualization/debug OBJ exports; NPZ fitting results are unchanged')
+    parser.add_argument(
+        '--reuse-session-resources',
+        action='store_true',
+        help='Reuse renderer and fixed loss resources across frames in a session')
+    parser.add_argument(
+        '--depth-approx-stride',
+        type=int,
+        default=1,
+        help='Approximation/acceleration mode only: subsample the observed '
+        'depth cloud by this stride. 1 (the default) is the upstream full '
+        'sampling contract; values >1 are explicitly NOT the formal '
+        'baseline and must not appear in formal configs.')
 
     parser.add_argument(
         '--fitting_stage',

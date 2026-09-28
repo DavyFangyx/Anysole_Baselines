@@ -32,7 +32,11 @@ def fit_single_frame(img,
                      output_shape_fn=None,
                      output_result_fn=None,
                      output_temp_fn=None,
-                     output_gt_depth_fn=None):
+                     output_gt_depth_fn=None,
+                     save_corr_debug=False,
+                     maxiters=100,
+                     depth_approx_stride=1,
+                     resource_cache=None):
 
     # import pdb
     # pdb.set_trace()
@@ -44,8 +48,15 @@ def fit_single_frame(img,
 
     gt_depth_vmap, gt_depth_nmap, dv_floor, dn_floor = camera.preprocessDepth(
         depth_map, depth_mask)
-    trimesh.Trimesh(
-        vertices=dv_floor.detach().cpu().numpy()).export(output_gt_depth_fn)
+    # 上游全采样口径（P3）：默认 stride=1，逐点使用观测深度云。
+    # depth_approx_stride>1 是显式近似/加速模式，不得作为正式 baseline 默认。
+    if depth_approx_stride > 1:
+        gt_depth_vmap = gt_depth_vmap[::depth_approx_stride]
+        gt_depth_nmap = gt_depth_nmap[::depth_approx_stride]
+        dv_floor = dv_floor[::depth_approx_stride]
+    if output_gt_depth_fn is not None:
+        trimesh.Trimesh(
+            vertices=dv_floor.detach().cpu().numpy()).export(output_gt_depth_fn)
 
     aver_depth_z = torch.mean(dv_floor[:, 2])
     if torch.abs(aver_depth_z) <= 1:
@@ -132,17 +143,29 @@ def fit_single_frame(img,
     # mesh.export('debug/pre_mesh.obj')
     # import pdb;pdb.set_trace()
 
+    # DepthTerm renders the SMPL mesh into a depth canvas of depth_size, so
+    # the intrinsics must match that canvas.  The calibration is native
+    # 1624x1240; scale it by the canvas/native ratio.  The observed cloud is
+    # compared in 3D, so the scaling only affects the render side.
+    depth_intr = camera.dIntr.clone()
+    depth_intr[0] = depth_intr[0] * depth_size[0] / depth_map.shape[1]
+    depth_intr[1] = depth_intr[1] * depth_size[1] / depth_map.shape[0]
+    depth_intr[2] = depth_intr[2] * depth_size[0] / depth_map.shape[1]
+    depth_intr[3] = depth_intr[3] * depth_size[1] / depth_map.shape[0]
+
     loss = SMPLifyMMVPLoss(
         essential_root=essential_root,
         model_faces=body_model.faces,
-        dIntr=camera.dIntr,
+        dIntr=depth_intr,
         depth_size=depth_size,
         cIntr=camera.cIntr,
         color_size=color_size,
         temp_contact_label=pre_contact_label,
         pre_pose=pre_pose,
         stage=stage,
-        dtype=dtype)
+        dtype=dtype,
+        save_corr_debug=save_corr_debug,
+        resource_cache=resource_cache)
     loss = loss.to(device)
 
     # import pdb;pdb.set_trace()
@@ -150,7 +173,7 @@ def fit_single_frame(img,
     # load weights
     opt_weights = loadweights.load_weights(stage)
 
-    with fitting.FittingMonitor(stage=stage) as monitor:
+    with fitting.FittingMonitor(stage=stage, maxiters=maxiters) as monitor:
         #######################################################################
         # start fitting
         if stage == 'init_shape':
@@ -213,8 +236,9 @@ def fit_single_frame(img,
 
     # ~~~   save output results ~~~ #
     # save mesh
-    mesh = trimesh.Trimesh(vertices=vertices, faces=body_model.faces)
-    mesh.export(output_mesh_fn)
+    if output_mesh_fn is not None:
+        mesh = trimesh.Trimesh(vertices=vertices, faces=body_model.faces)
+        mesh.export(output_mesh_fn)
     output_pose = body_model.body_pose.detach().cpu().numpy()
     output_shape = body_model.betas.detach().cpu().numpy()
     output_scale = body_model.model_scale_opt.detach().cpu().numpy()
@@ -267,4 +291,6 @@ def fit_single_frame(img,
     # cv2.imwrite('debug/new_framework/kp_src.png', img_src)
     # cv2.imwrite('debug/new_framework/kp_tar.png', img_tar)
     # import pdb;pdb.set_trace()
+
+    return resource_cache
     # print(contact_label)

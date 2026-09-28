@@ -32,9 +32,11 @@ class SMPLifyMMVPLoss(nn.Module):
             gmm_weights=0.01,
             tfoot_weights=0.0,
             tpose_weights=0.0,
-            # others
-            stage='init_shape',
-            dtype=torch.float32):
+                 save_corr_debug=False,
+                 # others
+                 stage='init_shape',
+                 dtype=torch.float32,
+                 resource_cache=None):
         super(SMPLifyMMVPLoss, self).__init__()
 
         self.dtype = dtype
@@ -60,22 +62,36 @@ class SMPLifyMMVPLoss(nn.Module):
         self.register_buffer('tpose_weights',
                              torch.tensor(tpose_weights, dtype=dtype))
 
-        self.depth_term = DepthTerm(
-            essential_root=essential_root,
-            cam_intr=dIntr,
-            img_W=depth_size[0],
-            img_H=depth_size[1],
-            faces=model_faces,
-            save_obj=True,
-            dtype=dtype)
-        self.color_term = ColorTerm(
-            cam_intr=cIntr,
-            img_W=color_size[0],
-            img_H=color_size[1],
-            dtype=dtype)
-        self.gmm_term = MaxMixturePriorLoss(
-            prior_folder=f'{essential_root}/smplify_essential')
-        self.contact_term = ContactTerm(essential_root=essential_root)
+        # These modules contain session-invariant resources (renderer scenes,
+        # GMM tensors and pressure-region mappings).  Reusing them is an
+        # implementation optimization only; the loss equations are unchanged.
+        cache = resource_cache if resource_cache is not None else {}
+        if 'depth_term' not in cache:
+            cache['depth_term'] = DepthTerm(
+                essential_root=essential_root,
+                cam_intr=dIntr,
+                img_W=depth_size[0],
+                img_H=depth_size[1],
+                faces=model_faces,
+                save_obj=save_corr_debug,
+                dtype=dtype)
+        if 'color_term' not in cache:
+            cache['color_term'] = ColorTerm(
+                cam_intr=cIntr,
+                img_W=color_size[0],
+                img_H=color_size[1],
+                dtype=dtype)
+        if 'gmm_term' not in cache:
+            cache['gmm_term'] = MaxMixturePriorLoss(
+                prior_folder=f'{essential_root}/smplify_essential')
+        if 'contact_term' not in cache:
+            cache['contact_term'] = ContactTerm(essential_root=essential_root)
+        self.depth_term = cache['depth_term']
+        self.color_term = cache['color_term']
+        self.gmm_term = cache['gmm_term']
+        self.contact_term = cache['contact_term']
+        if hasattr(self.depth_term, 'reset_frame_cache'):
+            self.depth_term.reset_frame_cache()
 
         # add temp loss
         self.iter_idx_0 = True  # whether iteration first

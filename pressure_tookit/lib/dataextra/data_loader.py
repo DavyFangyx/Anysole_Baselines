@@ -1,5 +1,4 @@
 import cv2
-import glob
 import numpy as np
 import os.path as osp
 import torch
@@ -28,14 +27,26 @@ def create_dataset(
         stage=stage)
 
 
-def read_rtm_kpts(keypoint_fn):
-    try:
-        data = dict(np.load(keypoint_fn, allow_pickle=True).item())
-    except:  # noqa: E722
-        data = np.load(keypoint_fn, allow_pickle=True)[0]  # only one people
+class ContractError(ValueError):
+    """输入契约错误：缺失/歧义数据，不猜测、不回绕。"""
 
-    points = np.array(data['keypoints'])
-    points_score = np.array(data['keypoint_scores'])
+
+def read_rtm_kpts(keypoint_fn):
+    data = np.load(keypoint_fn, allow_pickle=True)
+    # HALPE-26 单受试者契约：dict {'keypoints': (26,2), 'keypoint_scores': (26,)}。
+    # 不再保留旧的多人数组 [0] 回退——多人行静默取第一行是 P5 禁止的行为。
+    if data.dtype == object and data.shape == ():
+        payload = data.item()
+    else:
+        raise ContractError(
+            f'{keypoint_fn}: expected a single-subject keypoint dict, '
+            f'got array of shape {data.shape}; multi-person [0] fallback removed')
+    if 'keypoints' not in payload or 'keypoint_scores' not in payload:
+        raise ContractError(
+            f'{keypoint_fn}: missing keypoints/keypoint_scores keys')
+
+    points = np.array(payload['keypoints'])
+    points_score = np.array(payload['keypoint_scores'])
     points_score = points_score[:, np.newaxis]
     target_keypoints = np.concatenate([points, points_score], axis=1)
 
@@ -111,37 +122,48 @@ def load_contact(contact_fn):
     return contact_label
 
 
-def load_init_pose(data_fn, form='cliff'):
-    """_summary_
+def load_init_pose(data_fn, form='cliff', frame_id=None):
+    """加载单受试者 CLIFF 初始姿态。
 
-    Args:
-        data_fn (str): file path for loading init data
-        form (str, optional): date format for pose data. Defaults to 'cliff'.
-
-    Returns:
-        numpy.ndarray: load previous pose data or \
-            other network output pose data
+    P5 契约：pose 每行对应一个 canonical frame，按 frame id 精确取行；
+    不得从旧多人 NPZ 默认取第一行。
     """
-    # """_summary_
-
-    # Args:
-    #     data_fn (str): file path for loading init data
-
-    # Returns:
-    #     _type_: load previous pose data or other network output pose data
-    # """
-
     init_global_rot = None
     init_transl = None
 
-    # TODO: now only load cliff format
     if form == 'cliff':
         init_data = dict(np.load(data_fn).items())
 
-        if init_data['pose'].shape[0] > 1:
-            init_pose = np.expand_dims(init_data['pose'][0], 0)
+        if 'pose' not in init_data:
+            raise ContractError(f'{data_fn}: missing pose key')
+        pose = np.asarray(init_data['pose'])
+        if pose.ndim != 2 or pose.shape[1] != 72:
+            raise ContractError(
+                f'{data_fn}: expected pose (T,72), got {pose.shape}')
+        if frame_id is None:
+            if pose.shape[0] != 1:
+                raise ContractError(
+                    f'{data_fn}: pose has {pose.shape[0]} rows but no frame '
+                    'id was given; refusing to pick row 0 of a multi-row '
+                    'single-subject archive')
+            init_pose = pose
         else:
-            init_pose = init_data['pose']
+            ids = init_data.get('frame_id')
+            if ids is None:
+                raise ContractError(
+                    f'{data_fn}: no frame_id key; cannot select the row for '
+                    f'frame {frame_id}')
+            ids = np.asarray(ids).reshape(-1)
+            if ids.shape[0] != pose.shape[0]:
+                raise ContractError(
+                    f'{data_fn}: frame_id length {ids.shape[0]} != pose rows '
+                    f'{pose.shape[0]}')
+            matches = np.flatnonzero(ids == frame_id)
+            if matches.size != 1:
+                raise ContractError(
+                    f'{data_fn}: expected exactly one row for frame '
+                    f'{frame_id}, found {matches.size}')
+            init_pose = pose[matches]
         return init_pose[:, 3:], init_global_rot, init_transl
     elif form == 'tracking':
         init_data = dict(np.load(data_fn).items())
@@ -183,8 +205,10 @@ class Pressure_Dataset(Dataset):
         self.seq_name = seq_name
         self.init_root = init_root
 
-        self.start_idx = int(start_img_idx)
-        self.end_idx = int(end_img_idx)
+        self.start_idx = max(0, int(start_img_idx))
+        # ``-1`` is the public CLI sentinel for "through the last frame".
+        requested_end = int(end_img_idx)
+        self.end_idx = requested_end if requested_end >= 0 else 10 ** 9
 
         self.stage = stage
 
@@ -192,61 +216,69 @@ class Pressure_Dataset(Dataset):
 
         self.rgbd_path = osp.join(basdir, 'images', self.dataset_name,
                                   self.sub_ids, self.seq_name)
-        # rgb
-        self.img_paths = sorted(
-            glob.glob(osp.join(self.rgbd_path, 'color', '**'), recursive=True))
-        self.img_paths = [
-            x for x in filter(lambda x: x.split('.')[-1] == 'png',
-                              self.img_paths)
-        ][self.start_idx:self.end_idx]
-        # depth
-        self.depth_paths = sorted(
-            glob.glob(osp.join(self.rgbd_path, 'depth', '**'), recursive=True))
-        self.depth_paths = [
-            x for x in filter(lambda x: x.split('.')[-1] == 'png',
-                              self.depth_paths)
-        ][self.start_idx:self.end_idx]
-        # depth_mask
-        self.dmask_paths = sorted(
-            glob.glob(
-                osp.join(self.rgbd_path, 'depth_mask', '**'),
-                recursive=True))  # mask
-        self.dmask_paths = [
-            x for x in filter(lambda x: x.split('.')[-1] == 'png',
-                              self.dmask_paths)
-        ][self.start_idx:self.end_idx]
-        # keypoints
-        # kp seq length corres to pressure, but not image
-        kp_root = osp.join('input', f'{self.sub_ids}/{self.seq_name}')
-        self.kp_paths = sorted(
-            glob.glob(osp.join(kp_root, 'keypoints', '**'), recursive=True))
-        self.kp_paths = [
-            x
-            for x in filter(lambda x: x.split('.')[-1] == 'npy', self.kp_paths)
-        ][self.start_idx:self.end_idx]
 
-        # pressure data, A-pose has no pressure data
-
-        self.pressure_paths = sorted(
-            glob.glob(
-                osp.join(self.rgbd_path, 'insole', '**'), recursive=True))
-        self.pressure_paths = [
-            x for x in filter(lambda x: x.split('.')[-1] == 'npy',
-                              self.pressure_paths)
+        # 拟合帧由 adapter 的 frame_ids.npy 决定：shared frame id，只含
+        # valid 且非 fake 的帧。fake/invalid 帧不生成优化任务（P4）。
+        frame_ids_path = osp.join(self.rgbd_path, 'frame_ids.npy')
+        if not osp.isfile(frame_ids_path):
+            raise FileNotFoundError(
+                f'missing frame_ids.npy: {frame_ids_path} (run '
+                'AnysoleWorkspace/tool/adapters/pressure_toolkit/build_inputs.py)')
+        all_frame_ids = np.load(frame_ids_path)
+        self.frame_ids = [
+            int(x) for x in all_frame_ids
+            if int(x) >= self.start_idx and int(x) < self.end_idx
         ]
+        if not self.frame_ids:
+            raise ContractError(
+                f'no fitting frames in [{self.start_idx}, {self.end_idx}) '
+                f'for {self.seq_name}')
+
+        # 逐帧路径均以 shared frame id 命名（%06d），排序即 frame id 序
+        self.depth_paths = [osp.join(self.rgbd_path, 'depth',
+                                     f'{x:06d}.png') for x in self.frame_ids]
+        self.dmask_paths = [osp.join(self.rgbd_path, 'depth_mask',
+                                     f'{x:06d}.png') for x in self.frame_ids]
+        kp_root = osp.join(basdir, 'input', self.sub_ids, self.seq_name,
+                           'keypoints')
+        self.kp_paths = [osp.join(kp_root, f'{x:06d}.npy')
+                         for x in self.frame_ids]
+
+        # 全 session 拟合帧的 insole 映射（含 start_idx 之前的帧，供
+        # tracking 首帧找上一有效帧接触；P7 禁止负索引回绕）
+        self.insole_path_by_frame = {
+            int(x): osp.join(self.rgbd_path, 'insole', f'{int(x):06d}.npy')
+            for x in all_frame_ids
+        }
+        self.session_frame_ids = [int(x) for x in all_frame_ids]
         self.pressure_paths = [
-            x for x in self.pressure_paths
-            if int(x.rsplit('/', 1)[-1].split('.')[0]) >= self.start_idx
-            and int(x.rsplit('/', 1)[-1].split('.')[0]) < self.end_idx
+            self.insole_path_by_frame[x] for x in self.frame_ids
         ]
 
         # init shape data
-        self.shape_path = None if stage == 'init_shape 'else \
-            osp.join(self.basdir, 'annotations', self.dataset_name,
-                     'smpl_pose', self.sub_ids,
-                     f'init_shape_{self.sub_ids}.npz')
+        if stage == 'init_shape':
+            self.shape_path = None
+            self.cliff_path = None
+        else:
+            if not self.init_root:
+                raise ValueError('init_root is required for init_pose/tracking')
+            shape_path = osp.join(self.init_root, 'fitting', 'results',
+                                  self.dataset_name, self.sub_ids,
+                                  f'init_shape_{self.sub_ids}.npz')
+            if not osp.isfile(shape_path):
+                raise FileNotFoundError(
+                    f'Missing init_shape for {self.sub_ids}: {shape_path}')
+            self.shape_path = shape_path
+            cliff_path = osp.join(self.init_root, 'initialization',
+                                  self.dataset_name, self.sub_ids,
+                                  self.seq_name,
+                                  f'{self.seq_name}_cliff_hr48.npz')
+            if not osp.isfile(cliff_path):
+                raise FileNotFoundError(
+                    f'Missing single-subject CLIFF initialization for '
+                    f'{self.seq_name}: {cliff_path}')
+            self.cliff_path = cliff_path
 
-        # import pdb;pdb.set_trace()
         # joint mapper
         self.joint_mapper = self.init_joint_mapper()
 
@@ -274,11 +306,21 @@ class Pressure_Dataset(Dataset):
         ])[np.newaxis, :]
         return np.concatenate([openposemap, halpemap], axis=0).tolist()
 
+    def _previous_frame_id(self, frame_id):
+        """tracking 帧的前一有效拟合帧 id；缺失时返回契约错误，不回绕。"""
+        position = self.session_frame_ids.index(frame_id)
+        if position == 0:
+            raise ContractError(
+                f'frame {frame_id} has no previous fitting frame in '
+                f'{self.seq_name}; refusing negative-index wrap-around '
+                '(P7)')
+        return self.session_frame_ids[position - 1]
+
     def __iter__(self):
         return self
 
     def __next__(self):
-        if self.cnt >= len(self.pressure_paths):
+        if self.cnt >= len(self.frame_ids):
             raise StopIteration
 
         self.cnt += 1
@@ -286,21 +328,23 @@ class Pressure_Dataset(Dataset):
         return self.read_item(self.cnt - 1)
 
     def __len__(self):
-        return len(self.img_paths)
+        return len(self.frame_ids)
 
     def __getitem__(self, idx):
         return self.read_item(idx)
 
     def read_item(self, idx):
         # load data
+        frame_id = self.frame_ids[idx]
 
-        # rgb
-        img_path = self.img_paths[idx]
-        img = cv2.imread(img_path).astype(np.float32)  # [:, :, ::-1] / 255.0
+        # RGB is retained as a None placeholder for API compatibility. The
+        # active pressure_toolkit loss consumes keypoints/depth/contact only.
+        img = None
         # depth
         depth_path = self.depth_paths[idx]
         depth_map = cv2.imread(depth_path, -1).astype(np.float32) / 1000.
-        # depth_mask
+        # depth_mask（adapter 已做 human ∩ finite ∩ [0.4m,5m] 交集；
+        # 此处的 3×3 膨胀是上游原生行为，作用于交集后的人体 mask）
         dmask_path = self.dmask_paths[idx]
         mask_ori = cv2.imread(dmask_path)
         kernel = np.ones((3, 3), dtype=np.uint8)
@@ -326,7 +370,14 @@ class Pressure_Dataset(Dataset):
 
         # temp insole pressure
         if self.stage == 'tracking':
-            pre_pressure_path = self.pressure_paths[idx - 1]
+            # P7：前帧接触在进入 optimizer 前验证；缺失时契约错误，不回绕
+            previous_frame = self._previous_frame_id(frame_id)
+            pre_pressure_path = self.insole_path_by_frame.get(previous_frame)
+            if not pre_pressure_path or not osp.isfile(pre_pressure_path):
+                raise ContractError(
+                    f'previous-frame contact for frame {frame_id} is missing '
+                    f'(expected insole of frame {previous_frame}); cannot '
+                    'enter the optimizer (P7)')
             pre_contact_label = load_contact(pre_pressure_path)
         else:
             pre_contact_label = None
@@ -338,23 +389,27 @@ class Pressure_Dataset(Dataset):
             init_pose, init_betas, init_scale, init_global_rot, init_transl = \
                 None, None, None, None, None
         if self.stage == 'init_pose':
-            init_path = osp.join(self.init_root, self.dataset_name,
-                                 self.sub_ids, self.seq_name,
-                                 f'{self.seq_name}_cliff_hr48.npz')
+            # P5：按 shared frame id 选择单受试者 CLIFF 行
             init_pose, init_global_rot, init_transl = load_init_pose(
-                init_path, form='cliff')
+                self.cliff_path, form='cliff', frame_id=frame_id)
             init_betas, init_scale = load_init_shape(self.shape_path)
         if self.stage == 'tracking':
-            curr_idx = self.start_idx + idx - 1
-            init_path = osp.join(
-                self.init_root.rsplit('/', 1)[0], 'results', self.dataset_name,
-                self.sub_ids, self.seq_name, f'smpl_{curr_idx:03d}.npz')
+            previous_frame = self._previous_frame_id(frame_id)
+            init_path = osp.join(self.init_root, 'fitting', 'results',
+                                 self.dataset_name, self.sub_ids,
+                                 self.seq_name,
+                                 f'smpl_{previous_frame:06d}.npz')
+            if not osp.isfile(init_path):
+                raise FileNotFoundError(
+                    f'Missing tracking init for frame {frame_id} '
+                    f'(previous fitting frame {previous_frame}): {init_path}')
             init_pose, init_global_rot, init_transl = load_init_pose(
                 init_path, form='tracking')
             init_betas, init_scale = load_init_shape(self.shape_path)
 
         output_dict = {
             'root_path': self.rgbd_path,
+            'frame_id': frame_id,
             'depth_map': depth_map,
             'img': img,
             'depth_mask': dmask,

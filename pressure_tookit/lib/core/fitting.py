@@ -63,18 +63,26 @@ class FittingMonitor(object):
         '''
         prev_loss = None
         for n in range(self.maxiters):
-            old_params = [x for x in body_model.named_parameters()]
+            old_params = {
+                name: param.detach().clone()
+                for name, param in body_model.named_parameters()
+            }
 
             # curr_time = time.time()
             loss = optimizer.step(closure)
             # print(time.time() - curr_time)
             # import pdb;pdb.set_trace()
 
-            if torch.isnan(loss).sum() > 0 or torch.isinf(
-                    loss).sum() > 0 or loss is None:
+            params_finite = all(
+                torch.isfinite(param).all().item()
+                for _, param in body_model.named_parameters()
+            )
+            loss_finite = loss is not None and torch.isfinite(loss).all().item()
+            if not params_finite or not loss_finite:
                 print('Inf or NaN loss value, rolling back to old params!')
-                old_params = dict([(x[0], x[1].data) for x in old_params])
-                body_model.reset_params(**old_params)
+                with torch.no_grad():
+                    for name, param in body_model.named_parameters():
+                        param.copy_(old_params[name])
                 break
 
             # if n > 0 and prev_loss is not None and self.ftol > 0:
@@ -117,11 +125,12 @@ class FittingMonitor(object):
             # stop iterations here. This necessart, as lbfgs for example
             # performs multiple optimization steps in a single optimizer step.
             for param in body_model.parameters():
-                if np.any(np.isnan(param.data.cpu().numpy())) or \
-                   np.any(np.isinf(param.data.cpu().numpy())):
+                if not torch.isfinite(param).all():
                     print('nan in model')
                     backward = False
+                    stop = True
                     total_loss = torch.tensor(float('inf'))
+                    break
             if not stop:
                 if backward:
                     optimizer.zero_grad()
