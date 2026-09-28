@@ -54,3 +54,15 @@
 | D7 | 触觉 raw 协议 = 左/右 PressureWasher CSV（48 数值列 = 4×12/脚、t_us、valid_mask/fake、final_fake_marked 来源）；量程（满量程/增益）无记录，契约事实 | 选项 A（不改码） | — |
 
 数据层偏离 #0/#1（上游数据集移出）保持不变。
+
+## 本地偏离 #3（数据层，2026-09-29 用户裁定归档处置）
+
+| 项 | 内容 |
+| --- | --- |
+| 对象 1 | 主库冗余副本 `Baselines_Backup copy/`（实测 997M） |
+| 处置 1 | 压缩 `archive/Baselines_Backup_copy_20260929.tar.gz`（1.03G，636 条目校验）存入本仓库 archive/；**原件已删除**（冗余副本，无代码引用） |
+| 恢复方式 1 | `tar -xzf archive/Baselines_Backup_copy_20260929.tar.gz` |
+| 对象 2 | `Baselines_old/`（326M，参考树） |
+| 处置 2 | 压缩 `archive/Baselines_old_20260929.tar.gz`（164M，764 条目校验）；**原件保留**——`AnysoleWorkspace/tool/adapters/{MotionPRO/run_visual_chain.py, Step2Motion/tests.py, mmvp_series/depth/rgb2depth.py}` 仍引用 |
+| 对象 3 | `Baselines/utils` 符号链接 → `../Baselines_old/utils`（第 4 步 utils 迁移被叫停后的导入桥） |
+| 处置 3 | 保持符号链接，`.gitignore` 登记 `/utils` 与 `/archive/`（均不入库） |
