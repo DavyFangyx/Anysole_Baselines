@@ -36,3 +36,21 @@
 | 处置 | 整体移出本仓库。`0.*` 三件于提交 `09e07ad` 删除；`dance_*.pt` 因上游 `data/.gitignore` 的 `dancing/*.pt` 规则在首提交 `111220c` 时即未入库（用户随后删除工作树中的 `data/` 目录） |
 | 原因 | 上游 demo 数据集/检查点，与本项目 gait 数据无关 |
 | 恢复方式 | `git --git-dir=/data/fangyuxuan/projects/baselines_upstream_archive/git/Step2Motion.git show a7bdc40:data/dancing/<file>` |
+
+## 本地偏离 #2（数据协议层，2026-09-28 用户裁定 D0–D7）
+
+第一步「原始数据与 splits 适配」的交付契约决策。裁决与审计记录在主仓库
+`z_note/重构执行/10_原始数据适配_决策与执行记录.md`；本表为归档索引。
+
+| D | 交付契约 | 裁定 | 执行 commit |
+|---|---|---|---|
+| D0 | 底座（原始数据四部分 + splits + 协议口径）已明确；splits 104/36/36 | 登记 | — |
+| D1 | SMPL-24 neutral + 10 betas，raw 原样交付（y-up/m，D4 修正后口径） | 选项 A | — |
+| D2 | BVH-23 / Y-X-Z / cm / 120Hz / 72ch 原样交付；保留 output_dim 69（原生 xsens 分支背书，66/69 降级说明项） | 选项 A | e94f1ff |
+| D3 | 40Hz 为交付帧率；PoseTransOpt 重力 dt→1/fps，其余基线帧基仅登记 | 选项 A | bf26a98 |
+| D4 | raw 按原样交付（SMPL y-up/m、BVH cm）；z-up/m 转换归各 adapter | 修正后成立 | — |
+| D5 | valid/fake 双时钟作为 raw 元数据统一交付，各 adapter 自处理并登记 | 选项 A | — |
+| D6 | 相机标定统一交付 = protocol/calibration/<date>.json（外部只读）；adapter 换算原生三件套 | 选项 A | 5e31c52 |
+| D7 | 触觉 raw 协议 = 左/右 PressureWasher CSV（48 数值列 = 4×12/脚、t_us、valid_mask/fake、final_fake_marked 来源） | 选项 A（不改码） | — |
+
+数据层偏离 #0/#1（上游数据集移出）保持不变。
