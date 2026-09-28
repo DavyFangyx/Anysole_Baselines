@@ -8,3 +8,4 @@ image_height: 720
 focal_length: 600
 scale: 0.97
 depth_scale: 2.25
+fps: 40.0

@@ -44,8 +44,9 @@ def initial_trans(cfg, dataset):
             # ic(delta_depth)
             
             # Interpolation using parabolic approximation
+            dt = 1.0 / float(cfg['task'].get('fps', 40.0))
             for idx in range(1,next_contact_frame-last_contact_frame):
                 trans_all[idx+contact_change_idx_all[i][0]-1] = trans_all[contact_change_idx_all[i-1][0]] + idx*delta_depth
-                trans_all[idx+contact_change_idx_all[i][0]-1,1] += (-9.8) /2 * (idx * 0.033)*(idx * 0.033 - (contact_change_idx_all[i+1][0]-contact_change_idx_all[i][0]+2)*0.033)
+                trans_all[idx+contact_change_idx_all[i][0]-1,1] += (-9.8) / 2 * (idx * dt) * (idx * dt - (contact_change_idx_all[i+1][0]-contact_change_idx_all[i][0]+2) * dt)
     
     return trans_all
