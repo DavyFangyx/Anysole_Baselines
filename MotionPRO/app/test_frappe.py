@@ -61,6 +61,12 @@ def write_unified_motion(session_id, pred_by_frame, vertices_by_frame, poses_by_
         session_id=np.asarray(session_id),
         source_native_output=np.asarray(str(checkpoint_path)),
         target_fps=np.asarray(40.0, dtype=np.float32),
+        # 2026-10-01 U7 拍 A / E6：三基线 provenance 统一——MotionPRO 的
+        # pose/shape 全部来自模型输出（与注册表 sources 一致），PVE 可评估。
+        provenance_source_type=np.asarray("model_prediction"),
+        surface_source=np.asarray("model_prediction"),
+        shape_source=np.asarray("model_prediction"),
+        public_surface_metrics=np.asarray("true"),
     )
     log.info(f"Wrote unified MotionPRO prediction: {output}")
 
