@@ -5,7 +5,7 @@
 
 ## §1 一句话总述
 
-四基线（MotionPRO / Step2Motion / FPP-Net / PoseTransOpt / pressure_tookit，来自 `Baselines/` 的四个上游仓库：MotionPRO、Step2Motion、VP-MoCap、pressure_tookit）+ 主模型 AnySole 的可审计复现已走完 **D（数据协议）→ T（中间产物与模型接入）→ M（执行优化）**，**E（评估）待启动**；两库分工：**Baselines 库 = 原生代码 + 决策档案 + 偏离记录**，**主库 = 数据生产（`AnysoleWorkspace/tool/adapters/`）+ 公共评估协议**；**正式结果一律用原生口径生成（M 加速开关关闭）**。
+四基线（MotionPRO / Step2Motion / FPP-Net / PoseTransOpt / pressure_tookit，来自 `Baselines/` 的四个上游仓库：MotionPRO、Step2Motion、VP-MoCap、pressure_tookit）+ 主模型 AnySole 的可审计复现已走完 **D（数据协议）→ T（中间产物与模型接入）→ M（执行优化）**，**E（评估）已启动**：U7/U9/U10 已裁定（2026-10-01）、E6 已执行；正式结果生产仍按 `决策/04_E_评估收尾.md` §6 阻塞中；两库分工：**Baselines 库 = 原生代码 + 决策档案 + 偏离记录**，**主库 = 数据生产（`AnysoleWorkspace/tool/adapters/`）+ 公共评估协议**；**正式结果一律用原生口径生成（M 加速开关关闭）**。
 
 ## §2 底座（已裁定，不再讨论）
 
@@ -65,9 +65,12 @@
 | E1 | 同体系比较（主线） | 六模型正式结果全过公共 evaluator → 统一指标表 + 每模型协议说明行 | — | 两套协议：SMPL-24（AnySole/MotionPRO/PoseTransOpt/pressure_toolkit）、BVH-23（Step2Motion）、V2T（FPP-Net） | 待 T 后启动 |
 | E2 | 能力门控矩阵 | 26 键 × 六模型主矩阵 + 三条硬规则（能力≠数组存在 / provenance 不门控 / AND 三件套）；漂移点 a–k 待修订 | 主库 9de5d30（E 方案入档） | §3.3 主矩阵；逐 `—` 依据逐项可追溯 | 矩阵已成稿；E2-1 定版待裁、E2-2~6 待办 |
 | E3 | 公共 contact GT 口径 | 五问待裁：Q1 GT 源（建议 press2Cont 顶点级）/ Q2 是否公共 / Q3-R35 三问 / Q4 th=0.5 / Q5 `contact_f1` 是否恢复 | — | 真实消费面 = FPP-Net 一个；磁盘四处口径互斥（f6_soft / press2Cont / motion_f6 / th=0.7） | 待拍板（`—` 影响面仅 FPP 行 + 展示层） |
-| E4 | 指标口径 | foot sliding 单一公式（`metrics.py:364`，接触判据 0.3 m/s 只看 GT）+ 按协议关节集；U7 PVE 启用 vs 禁用；跨 session 尺度对齐 | — | 主模型与基线同一函数对象（`solver.py:32` 直接 import）；两套关节集 ankle↔Foot / foot↔ToeBase | E4-1 确认现状；U7 待裁；E4-3 登记 |
-| E5 | 交付 gate 与阻塞清单 | A/B 可跑、C 基本不可跑、D–G 依赖；U9 门槛三方案；推荐导出顺序（C3 先行） | — | B 阶段 101+61+34 全过；`fpp_checkpoint=false`（最长链）；C1 实为 36/36 从头跑；唯一齐备块 = T2M | 阻塞中（细节见下） |
-| U7 / U9 等 | 关键待拍板 | U7 PVE 口径（建议拍 A 启用 + 表注"拟合族/预测族不作排名"）；U9 正式结果完整性门槛（建议 U9-c 起步、U9-b 冻结） | — | §8 待拍板清单为唯一汇总（含四份归档全部挂账） | 待裁 |
+| E4 | 指标口径 | foot sliding 单一公式（`metrics.py:364`，接触判据 0.3 m/s 只看 GT）+ 按协议关节集；U7 PVE 启用 vs 禁用；跨 session 尺度对齐 | — | 主模型与基线同一函数对象（`solver.py:32` 直接 import）；两套关节集 ankle↔Foot / foot↔ToeBase | E4-1 确认现状；U7 已裁定（启用）；E4-3 登记 |
+| E5 | 交付 gate 与阻塞清单 | A/B 可跑、C 基本不可跑、D–G 依赖；U9 门槛已裁定（删除定义）；推荐导出顺序（C3 先行） | — | B 阶段 101+61+34 全过；`fpp_checkpoint=false`（最长链）；C1 实为 36/36 从头跑；唯一齐备块 = T2M | 阻塞中（细节见下） |
+| E6 | 三 SMPL-24 基线（MotionPRO / VP-MoCap / pressure_toolkit） | 导出侧补齐 `surface_source` / `shape_source` / `public_surface_metrics` 元数据（pressure_toolkit 已有；MotionPRO = `model_prediction`、VP-MoCap = `method_optimization`，与 `models_modes.yaml` sources 一致；注册表无需改）；`evaluate.py` 闸门加固待 H13 后随行（遗留） | 主库 cb51240、Baselines 6c38948 | B 阶段三测试 34/101/61 复跑全过 + 三写入点写-读往返冒烟（负例含缺省 true / false 关闭） | 完成 |
+| U7 | 关键裁定（PVE 口径） | **已裁定（2026-10-01）：拍 A（启用）** + 表注"拟合族/预测族不作排名" + 三基线 provenance 统一（E6 条目）；备选"降为明细"被否决；旧任务书禁令已废止删除 | — | 详见 `决策/04_E_评估收尾.md` §5.2、§5.4 | 已裁定（启用 + 表注 + E6） |
+| U9 | 关键裁定（完整性门槛） | **已裁定（2026-10-01）：删除「可发布」全部定义**——不预设完整性门槛、随做随发布；原三方案作废 | — | 详见 `决策/04_E_评估收尾.md` §6.6 | 已裁定（删除定义） |
+| 其余待拍板 | E3-Q1–Q5 / E4-1 / E2-1 等 | §8 待拍板清单为唯一汇总（含四份归档全部挂账） | — | `决策/04_E_评估收尾.md` §8 | 待裁 |
 
 ### 3.5 R 表：风险裁定（细节见 `决策/05_R1-R3_风险裁定.md`）
 
@@ -84,11 +87,11 @@
 | 模型 | 类型 | 输入与生产者 | 输出协议 | 监督 | 适配状态 | 正式结果 | 关键风险 / 裁定 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | MotionPRO | 学习型·回归（FRAPPE） | 图像特征 (T,2048) + 压力毯 (T,320,120)；`tool/adapters/MotionPRO/`（adapter + run_visual_chain） | smpl24：(N,85) = beta(10)+theta(72)+transl(3) | **唯一有独立 GT**：`smpl.npy` / `keypoints.npy` / `contact.npy` | T1 ✓ 0686ccd（140 session 六件套）+ T2 ✓ 2ae7572 | 36/36 npz，mtime 09-24（是否属新链待 M10 核） | 锚点空毯 53.8%（R1）、入口丢行（R1）、时钟 +9.5 帧（R2）；ckpt 属 09-22 旧链需重训 |
-| Step2Motion | 学习型·条件扩散 | 条件 (T,50)（16 压/足 + IMU）+ x0 (T,66→69)；`build_gait.py` | bvh23：(T,66) → 反归一化 → `_gen.bvh` | 训练 `.pt` 的 poses 字段自身（无接触监督） | T1 ✓ bceb8ee（原生 .pt 重导出）+ T2 ✓ 0a1bb34 | 36/36 目录存在，仅 12 个有 plain `_gen.bvh`，其余仅 c0/c1 变体 | variant 规则待定；M8 早停实验在跑；评估 legs/toes 指标名实不符（审计 S2） |
+| Step2Motion | 学习型·条件扩散 | 条件 (T,50)（16 压/足 + IMU）+ x0 (T,66→69)；`build_gait.py` | bvh23：(T,66) → 反归一化 → `_gen.bvh` | 训练 `.pt` 的 poses 字段自身（无接触监督） | T1 ✓ bceb8ee（原生 .pt 重导出）+ T2 ✓ 0a1bb34 | 36/36 目录存在，12 个有 plain `_gen.bvh`，仅 S14063 有 c0/c1 变体，其余 23 个无产物 | variant 规则待定；M8 早停实验在跑；评估 legs/toes 指标名实不符（审计 S2） |
 | FPP-Net | 学习型·时序网络 | (5,26,3) 关键点 + 31×11×2 鞋垫；`tool/adapters/FPP-Net/` | V2T：(484) 压力重建 + (192) 顶点接触概率 | press2Cont 二值（网格级 + 顶点级），加载时由输入派生、**无独立 GT 文件** | T2 ✓ fc1010f + M12 ✓ cedd921 / 主库 bf26da7 | **1/36**（S14011 smoke） | **生产 ckpt 全库缺失 → 必须重训（最长链 C3）**；侧车 GT th=0.7 错配；R3 故障格三通道 |
 | PoseTransOpt | 优化型·逐帧优化 | CLIFF 先验 + 2D 关键点 + FPP 4-flag + 模板深度（RGB 仅可视化）；`mmvp_series/` | smpl24：`opt_result.pth` {pose (T,24,3,3), beta (T,10), trans (T,3)} | 无训练监督（四项损失目标全部由运行时输入派生） | T2 ✓ 71d8466 + D6 逐日期 fx（09f57f7）+ D3 dt（bf26a98） | 归 VP-MoCap 行 **1/36** | 依赖 C3（FPP `pred_contact_smpl`）；M5–M7 待启动；`run_full_mmvp --gpu 0` exit 1 待修 |
 | pressure_tookit | 优化型·SMPLify 式 | RGB-D + insole 31×11 + 2D 关键点 + CLIFF + 地面/标定；`mmvp_series/pressure_tookit/` | smpl24：地面系 SMPL npz + OBJ 网格 | 无训练监督（insole 9 区域二值标签 + GMM 先验） | T2 ✓ 3db7efd + M1–M4 ✓ 7706cc6 / 主库 536dfd5 | **0/36** | C1 实为 36/36 从头跑；depth 58 session 未接 adapter；floor 数据全缺；U7（PVE）待裁 |
-| AnySole（主模型） | 学习型·多模态主线 | 四模式 VT2M/V2M/T2M/V2T，由 config_id 展开；`anysole/`（主库，不在 Baselines 库） | smpl24（V2T 行记 `pressure`）：`predictions/eval_motion/<sid>_<config>.npz` | 鞋垫标签 `contact_method ∈ {joint_and, motion_f6, f6_soft, pressure_f6}`；接触指标为诊断键 | T1 ✓ bc0834a（labels 1400 npz）+ 9120884（HRNet 140/140）；**HMR 已舍弃** | 11 基座 ckpt 齐；仅 V3_3B / V3_4b 有 144 npz（36×4 config） | 未导出基座需重跑 `anysole.eval --split test`（不依赖训练）；不在 `models_modes.yaml`（矩阵唯一例外） |
+| AnySole（主模型） | 学习型·多模态主线 | 四模式 VT2M/V2M/T2M/V2T，由 config_id 展开；`anysole/`（主库，不在 Baselines 库） | smpl24（V2T 行记 `pressure`）：`predictions/eval_motion/<sid>_<config>.npz` | 鞋垫标签 `contact_method ∈ {joint_and, motion_f6, f6_soft, pressure_f6}`；接触指标为诊断键 | T1 ✓ bc0834a（labels 1400 npz）+ 9120884（HRNet 140/140）；**HMR 已舍弃** | 11 基座 ckpt 齐；12 基座 × 144 npz 已齐（09-30 产出，血缘与口径待核） | 不在 `models_modes.yaml`（矩阵唯一例外） |
 
 ## §5 复现路径（通用五步）
 
@@ -107,7 +110,7 @@
 5. 故障格 cell 35 三通道污染：**1.48% 假阴性 / 20.05% 帧饱和 / 0.313% 假接触（封闭在 3/96 顶点）**（`05_R1-R3` §四）。
 6. FPP 侧车顶点 GT 实为**已退役 th=0.7**（非 0.5）+ 38 个 session 用旧权重（S8×9/S12×11/S13×18）（`05_R1-R3` §四 4-5）。
 7. V3 接触判据一致度 **0.66–0.80**（LA 0.716 / LF 0.664 / RA 0.800 / RF 0.707）——已降为诊断、不作硬 gate（`02_T_方案` §4.3/§13 T1-11；`05_R1-R3` §二）。
-8. legs/toes 指标名实不符：Step2Motion `metrics.py:320-352` 关节索引按上游骨架硬编码（"MPJPE Legs" 实测为脊柱/颈/头/肩等）（`z_note/评估/基线语义审计_总报告_20260927.md` §2 S2）。
+8. legs/toes 指标名实不符：Step2Motion `metrics.py:320-352` 关节索引按上游骨架硬编码（"MPJPE Legs" 实测为脊柱/颈/头/肩等）（`z_note/评估/评估配置说明书.md` §5）。
 
 ## §7 文件地图
 
@@ -119,6 +122,7 @@
 | `决策/04_E_评估收尾.md` | E1–E5（E2 矩阵 / E3 接触 GT / E4 口径 / E5 阻塞）+ §8 待拍板唯一汇总 |
 | `决策/05_R1-R3_风险裁定.md` | R1–R3 证据与方案 + S1/S2 时钟全库扫描 + 交叉影响与复现脚本 |
 | `模型输入与监督信号.md` | 唯一输入清单：每模型原生协议 / 本地适配口径 / 监督与输出（T 系列验收依据） |
+| `z_note/评估/评估配置说明书.md` | 当前评估配置唯一说明书（取代 `z_note/评估/` 历史文件）：§5 数据底座与已知偏差 / §6 正式结果状态与生产路径 / §8 与决策档案关系 |
 | `README.md` | 仓库定位：四上游来源、审计纪律、两库契约 |
 | `archive/` | `Baselines_old` 与 `Baselines_Backup_copy` 快照 tar.gz（2026-09-29） |
 
