@@ -27,67 +27,119 @@
 
 ## 各基座命令速查（训练 / 评估 / 运行）
 
-统一前提：数据生产在主库 `AnysoleWorkspace`（shared facts + 各 adapter 产物）；
-**正式结果一律原生口径（M 加速开关关）**；正式评估走主库公共协议层：
-导出 → `results_display/script/r_test2_compare.py` 对比（能力门控，缺能力记 `—`）。
-命令均在本仓库对应模型目录下执行；每基座标注实测环境（2026-10-03 现状）。
+统一前提：数据生产在主库 `AnysoleWorkspace`（shared facts + 各 adapter 产物，已齐）；
+**正式结果一律原生口径（M 加速开关关）**；对比统一走主库 `r_test2_compare.py`（能力门控）。
+命令照抄即可（GPU 编号按当时空闲卡改；每条的注释说明干什么、产物去哪）。
 
-### MotionPRO（学习型 · FRAPPE 回归）
+### MotionPRO（学习型 · FRAPPE 回归）｜touch_gait
 
-- 环境：conda `motionpro`（py3.8，上游 README）
-- 数据前置：`AnysoleWorkspace/tool/adapters/MotionPRO/` 六件套 140/140
-  （虚拟毯 `pressure.npz` + `smpl.npy` 四键 + `contact.npy` **二值 {0,1}**（T2-01c）+
-  keypoints/bbox/feature_hrnet + frame_id/color）
-- 训练：`python -m app.train_frappe`（hydra，`config/config.yaml`；整轮 exit 0 已实测）
-- 评估：`python -m app.test_frappe`（T2-01a 移植的训练收尾评估，36 session 落盘 eval_motion）
-- 导出/对比：主库 `AnysoleWorkspace/tool/export_baseline_motion.py --model motionpro --split <val|test> --force` → `r_test2_compare.py`
-- 注意：旧 ckpt（09-22 旧链）作废需重训；R1 锚点空毯 / R2 时钟为已登记偏差
+```bash
+# ① 训练（hydra 读 config/config.yaml；产物 results/baselines/MotionPRO/checkpoints/）
+cd /data/fangyuxuan/projects/gait/Baselines/MotionPRO
+CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m app.train_frappe
 
-### Step2Motion（学习型 · 条件扩散）
+# ② 评估（T2-01a 训练收尾评估；36 session 落盘 predictions/eval_motion/）
+CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m app.test_frappe
 
-- 环境：touch_gait（py3.8；`src/prefer_env_site.py` 兼容层，S2M-01）
-- 数据前置：`AnysoleWorkspace/tool/adapters/Step2Motion/build_gait.py`
-  （R3 清洗后口径 `gait*.pt` + normalizer；`--no-imu` 变体同入口）
-- 训练：`python src/train.py --config configs/config_gait.json`
-  （变体：`--no-imu` / `--only_translation`；M8 早停口径：epochs_pose 100 / epochs_trans 200）
-- 评估：`python src/test.py <ckpt> <skeleton.bvh> --dataset <gait_test.pt> --clip 0`（zyx 导出修正已登记）
-- 对比：主库 R_Test2（BVH-23 协议行；legs/toes 指标名实不符为已登记偏差）
+# ③ 导出统一 motion npz → ④ 进对比表（主库执行）
+cd /data/fangyuxuan/projects/gait
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model motionpro --split test --force
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
+```
 
-### FPP-Net（学习型 · V2T 时序网络）
+注意：旧 ckpt（09-22 旧链）作废，正式结果需 ① 重训后走 ②③④；R1 锚点空毯 / R2 时钟为已登记偏差。
 
-- 环境：touch_gait（**numpy<2 铁律**：任何 build 步骤禁用 numpy≥2 的 python，P1 实测）
-- 数据前置：`AnysoleWorkspace/tool/adapters/mmvp_series/fpp/build_inputs.py --force` +
-  `build_metadata.py --force`（E3-A 清洗口径；pixel_weight 自愈 S7/S11）
-- 训练（M12 口径，2026-10-03 实测 1410ep ≈13.6h）：
+### Step2Motion（学习型 · 条件扩散）｜touch_gait（py3.8）
 
-  ```bash
-  CUDA_VISIBLE_DEVICES=<gpu> NVIDIA_TF32_OVERRIDE=0 python -m app.train_temporal \
-    --config configs/temporalKPSMPLCont_series5_mlp.yaml --batch_size 32 --num_threads 4 --gpus "0"
-  ```
+```bash
+# ① 训练（M8 口径 epochs_pose=100 / epochs_trans=200；ckpt → results/baselines/Step2Motion/checkpoints/gait_model/）
+cd /data/fangyuxuan/projects/gait/Baselines/Step2Motion
+CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python src/train.py --config configs/config_gait.json
+# 无 IMU 变体（38 维输入，数据集 gait_noimu/）：
+# ... src/train.py --config configs/config_gait.json --no-imu
 
-- 三 split 推理：`python -m app.infer_smplcont --config configs/temporalKPSMPLCont_series5_mlp.yaml --phase <train|val|test> --batch_size 32 --num_threads 4 --no_visualization --gpus "0"`
-- 导出：`AnysoleWorkspace/tool/adapters/mmvp_series/fpp/export_v2t.py --sessions <ids> --force`
-  （E3-A 元数据自证：press2Cont 顶点级二值 th=0.5 + `pixel_weight_revision`）
-- 对比：R_Test2 V2T 行（brief 第 7 键接触级，仅 FPP 行有值）
+# ② 评估（zyx 导出修正已登记；默认 dataset 取 config 内 test_data）
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python src/test.py \
+  /data/fangyuxuan/projects/gait/results/baselines/Step2Motion/checkpoints/gait_model
 
-### PoseTransOpt（VP-MoCap · 优化型逐帧优化）
+# ③ 对比（BVH-23 协议行；主库执行）
+cd /data/fangyuxuan/projects/gait
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
+```
 
-- 环境：**mmvp**（需 open3d；touch_gait 缺——B7 已登记）；VPoser 资产 `models/V02_05`
-  （.gitignore 本地资产，缺失时自 `Baselines_old` 备份恢复）
-- 数据前置：FPP 三 split 推理产物（`pred_contact_smpl`）+ adapter 树（join_manifest）
-- 运行：`python run_full_mmvp.py --split <train|val|test|all> [--sessions S1,S2] --gpu <n> [--max-iter N] [--no-visualization] [--force]`（9/9 测试过，2026-10-03）
-- 导出/对比：主库 `export_baseline_motion.py --model vp_mocap` → R_Test2（SMPL-24 行）
+注意：legs/toes 指标名实不符为已登记偏差；正式结果需 ① 重训（旧 ckpt 09-22/09-28 换代）。
 
-### pressure_tookit（优化型 · SMPLify 式）
+### FPP-Net（学习型 · V2T 时序网络）｜touch_gait（**numpy<2 铁律**）
 
-- 环境：touch_gait（数据侧 10-03 实测；本库代码无 open3d 依赖）
-- 数据前置（10-03 已生产齐）：`AnysoleWorkspace/tool/adapters/mmvp_series/pressure_tookit/build_inputs.py`
-  （floor 9/9 + depthpro 52,328 帧 + insole + CLIFF；生产集合 140 内 0 缺失）
-- 运行：`python run_full_mmvp.py --stage <fit|init_shape> --split <all|...> [--sessions ...] [--subject S5 --gender male]`
-  （M1–M4 口径：GPU ICP 不转正（正式=CPU）、画布 640×576、maxiters 101）
-- 导出/对比：主库 `export_baseline_motion.py --model pressure_toolkit` → R_Test2
+```bash
+cd /data/fangyuxuan/projects/gait/Baselines/VP-MoCap/FPP-Net
 
-### 公共评估对比（主库）
+# ① 训练（M12 口径；2026-10-03 实测 1410ep ≈13.6h；ckpt → results/baselines/FPP-Net/checkpoints/tempKPSMPL_series5_mlp/）
+CUDA_VISIBLE_DEVICES=1 NVIDIA_TF32_OVERRIDE=0 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m app.train_temporal \
+  --config configs/temporalKPSMPLCont_series5_mlp.yaml --batch_size 32 --num_threads 4 --gpus "0"
 
-`results_display/script/r_test2_compare.py`（`--by-mode` 分块；能力门控 + 协议配对 GT；
-正式结果只收原生口径产物）。指标唯一实现与能力矩阵见主库 `results_display/README_metrics.md`。
+# ② 三 split 推理（pred_contact_smpl → AnysoleWorkspace/work/VP-MoCap/v1/fpp_predictions/）
+for phase in train val test; do
+  CUDA_VISIBLE_DEVICES=1 NVIDIA_TF32_OVERRIDE=0 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m app.infer_smplcont \
+    --config configs/temporalKPSMPLCont_series5_mlp.yaml --phase $phase --batch_size 32 --num_threads 4 --no_visualization --gpus "0"
+done
+
+# ③ 导出 V2T sidecar（E3-A 元数据自证：press2Cont 顶点级二值 th=0.5；结果 → results/baselines/FPP-Net/predictions/v2t/）
+cd /data/fangyuxuan/projects/gait
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/adapters/mmvp_series/fpp/export_v2t.py --split all --force
+
+# ④ 对比（V2T 行；brief 第 7 键接触级仅 FPP 行有值）
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
+```
+
+注意：任何 build/导出步骤禁用 numpy≥2 的 python（P1 实测会写坏 pickle）；数据重建
+= `AnysoleWorkspace/tool/adapters/mmvp_series/fpp/build_inputs.py --force` + `build_metadata.py --force`。
+
+### PoseTransOpt（VP-MoCap · 优化型逐帧优化）｜**mmvp**（需 open3d）
+
+```bash
+cd /data/fangyuxuan/projects/gait/Baselines/VP-MoCap/PoseTransOpt
+
+# ① 运行（逐帧优化；产物 AnysoleWorkspace/work/VP-MoCap/v1/pose_optimization/）
+#   单 session 冒烟（2026-10-03 实测通过）：
+/data/fangyuxuan/miniconda3/envs/mmvp/bin/python run_full_mmvp.py --sessions S14011 --gpu 0 --max-iter 3 --max-frames 30 --no-visualization --force
+#   全量正式（split 批量；去掉 --max-iter/--max-frames 即全帧全迭代）：
+CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/mmvp/bin/python run_full_mmvp.py --split test --gpu 0 --no-visualization --force
+
+# ② 导出 motion npz → ③ 对比（SMPL-24 行）
+cd /data/fangyuxuan/projects/gait
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model vp_mocap --split test --force
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
+```
+
+前置：FPP 三 split 推理产物（② 的 fpp_predictions）必须已存在；VPoser 资产
+`models/V02_05`（.gitignore 本地资产，缺失时自 `Baselines_old/VP-MoCap/PoseTransOpt/models/` 恢复）。
+
+### pressure_tookit（优化型 · SMPLify 式）｜touch_gait
+
+```bash
+cd /data/fangyuxuan/projects/gait/Baselines/pressure_tookit
+
+# ① 运行（两阶段：init_shape → fit；M 口径：ICP 固定 cpu、画布默认 640×576、maxiters=101；
+#    GPU 只做 kNN 辅助，--per-gpu 控制每卡并行槽）
+CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python run_full_mmvp.py --split all --stage init_shape --gpu 0 --per-gpu 4
+CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python run_full_mmvp.py --split all --stage fit --gpu 0 --per-gpu 4
+
+# ② 导出 motion npz → ③ 对比（SMPL-24 行；--female S14 为 S14 受试者性别口径）
+cd /data/fangyuxuan/projects/gait
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model pressure_toolkit --split test --force
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
+```
+
+数据前置（10-03 已生产齐）：floor 9/9 + depthpro 52,328 帧（生产集合 140 内 0 缺失）；
+`model_inputs/pressure_toolkit/v1/` 由主库 `adapters/mmvp_series/pressure_tookit/build_inputs.py` 生成。
+
+### 公共评估对比（主库，全部基线通用）
+
+```bash
+cd /data/fangyuxuan/projects/gait
+# 对比表（--split val|test；能力门控 + 协议配对 GT；正式结果只收原生口径产物）
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
+```
+
+指标唯一实现与能力矩阵见主库 `results_display/README_metrics.md`。
