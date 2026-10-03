@@ -6,3 +6,4 @@ wandb/
 # 与归档目录均不入库
 /utils
 /archive/
+VP-MoCap/PoseTransOpt/models/V02_05/
