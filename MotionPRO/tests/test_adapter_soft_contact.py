@@ -1,8 +1,9 @@
-"""MotionPRO private soft-f6 model input tests on one canonical session.
+"""MotionPRO private f6 model input tests on one canonical session.
 
 Verifies: (T,10) contact with only columns 6/7 non-zero, values restricted to
-{0.05,0.30,0.70,0.95}, binarized soft values equal the motion_f6 hard states,
-shared frame id consistency, and the required artifact.json declaration.
+{0, 1} (binary f6 = motion_f6 hard decision; the four-level soft intermediate
+is never persisted, 2026-10-03 ruling), shared frame id consistency, and the
+required artifact.json declaration.
 
 Run directly (touch_gait env):
 
@@ -23,7 +24,6 @@ if str(REPO_ROOT) not in sys.path:
 from AnysoleWorkspace.tool.adapters.MotionPRO.adapter import (  # noqa: E402
     ADAPTER_VERSION,
     CONTACT_COLS,
-    F6_SOFT,
     LEFT_COL,
     RIGHT_COL,
     _context,
@@ -50,26 +50,24 @@ def test_value_set_and_columns():
     contact = soft_f6_contact(ctx)
     assert contact.shape == (ctx["n"], CONTACT_COLS)
     assert contact.dtype == np.float32
-    allowed = {round(float(v), 2) for v in F6_SOFT.values()}
     for column in range(CONTACT_COLS):
-        values = {round(float(v), 2) for v in np.unique(contact[:, column])}
+        values = set(np.unique(contact[:, column]))
         if column in (LEFT_COL, RIGHT_COL):
-            assert values <= allowed, f"column {column} has {values}"
+            assert values <= {0.0, 1.0}, f"column {column} has {values}"
             assert values, f"column {column} is empty"
         else:
             assert values == {0.0}, f"column {column} must be all zero, got {values}"
 
 
-def test_soft_binary_matches_motion_f6():
+def test_binary_equals_motion_f6():
     session = _session()
     ctx = _context(session)
     contact = soft_f6_contact(ctx)
     states, _ = _f6_pipeline(ctx)
-    # Binarizing the four soft levels must reproduce the motion_f6 hard
-    # decision per foot (the frozen F6 semantics).
+    # The exported binary f6 must equal the motion_f6 hard decision per foot
+    # (the frozen F6 semantics; the four-level intermediate is not persisted).
     for column in (LEFT_COL, RIGHT_COL):
-        hard = (contact[:, column] > 0.5).astype(np.int8)
-        assert np.array_equal(hard, states[:, (0, 1)[column - LEFT_COL]])
+        assert np.array_equal(contact[:, column], states[:, (0, 1)[column - LEFT_COL]])
 
 
 def test_model_input_files_and_frame_id():
@@ -91,8 +89,9 @@ def test_artifact_contact_declaration():
     artifact = json.loads((out_dir / "artifact.json").read_text(encoding="utf-8"))
     contact = artifact["parameters"]["contact"]
     assert contact["physical_file"] == "contact.npy"
-    assert contact["semantic_role"] == "motionpro_private_soft_f6_foot_loss_weight"
-    assert contact["value_set"] == [0.05, 0.30, 0.70, 0.95]
+    assert contact["semantic_role"] == "motionpro_private_f6_foot_loss_weight"
+    assert contact["value_set"] == [0, 1]
+    assert contact["soft_levels_intermediate_not_persisted"] == [0.05, 0.30, 0.70, 0.95]
     assert contact["formal_metric_input"] is False
     assert contact["native_diagnostic_only"] is True
     raster = artifact["parameters"]["raster"]
@@ -102,7 +101,7 @@ def test_artifact_contact_declaration():
 
 
 if __name__ == "__main__":
-    for fn in (test_value_set_and_columns, test_soft_binary_matches_motion_f6,
+    for fn in (test_value_set_and_columns, test_binary_equals_motion_f6,
                test_model_input_files_and_frame_id, test_artifact_contact_declaration):
         fn()
         print(f"ok: {fn.__name__}")

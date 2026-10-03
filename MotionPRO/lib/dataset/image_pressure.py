@@ -180,13 +180,13 @@ class ImagePressureDataset(Dataset):
                     f'(T,320,120), got {tuple(pressure.shape)}')
             if not contact_file.is_file():
                 raise FileNotFoundError(
-                    f"Missing MotionPRO private soft-f6 contact {contact_file}. Run "
+                    f"Missing MotionPRO private f6 contact {contact_file}. Run "
                     f"`python -m AnysoleWorkspace.tool.adapters.MotionPRO.adapter "
                     f"--session {session_dir.name}`."
                 )
             contact_gt = np.load(contact_file)
             if contact_gt.ndim != 2 or contact_gt.shape[1] != 10:
-                raise ValueError(f'{contact_file}: expected (T,10) soft-f6 contact')
+                raise ValueError(f'{contact_file}: expected (T,10) binary f6 contact')
             facts = load_frames_facts(session_dir)
             if frame_id_file.is_file():
                 saved_frame_id = np.load(frame_id_file)
