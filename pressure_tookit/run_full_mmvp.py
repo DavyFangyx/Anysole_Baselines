@@ -76,6 +76,7 @@ import csv
 import fcntl
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -505,9 +506,19 @@ def write_run_artifact(run_root: Path, parameters: dict, sessions: dict,
             drifted = sorted(
                 key for key in set(previous) | set(parameters)
                 if previous.get(key) != parameters.get(key))
-            raise SystemExit(
-                f"run artifact 口径 drift at {run_root}: {drifted}; refusing to "
-                "merge two different 口径 into one run root")
+            # 2026-10-04 user ruling: a new 口径 automatically replaces the old
+            # run root instead of refusing to merge.  Old outputs under a
+            # different caliber must not silently mix with the new run, so the
+            # root is reset (output trees + record) and re-registered fresh;
+            # .locks survives because this function holds the artifact lock.
+            print(f"run artifact 口径 drift at {run_root}: {drifted}; "
+                  f"resetting the run root to the new 口径", file=sys.stderr)
+            for entry in run_root.iterdir():
+                if entry.is_dir() and entry.name != ".locks":
+                    shutil.rmtree(entry)
+                elif entry.is_file():
+                    entry.unlink()
+            existing = {}
         merged_sessions = dict(existing.get("sessions") or {})
         merged_sessions.update(_artifact_sessions(sessions))
         # frame_start/frame_stop are the half-open fitting range of each session;
