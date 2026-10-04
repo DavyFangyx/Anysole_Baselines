@@ -9,4 +9,4 @@ wandb_entity: davyfangyuxuan-nanjing-university-of-aeronautics-and-ast
 # hydra parameters
 hydra:
   run:
-    dir: ${oc.env:ANYSOLE_RESULTS,../../results}/MotionPRO/logs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: ${oc.env:ANYSOLE_RESULTS,../../results}/baselines/MotionPRO/logs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}

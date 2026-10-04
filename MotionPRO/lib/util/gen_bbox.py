@@ -85,7 +85,7 @@ def generate_bbox(seq_root: Path, skip_existing: bool = False):
                     last_x1, last_y1, last_x2, last_y2, last_score = x1, y1, x2, y2, score
                 except Exception:
                     x1, y1, x2, y2, score = last_x1, last_y1, last_x2, last_y2, last_score
-                    log_path = RESULTS_ROOT / "MotionPRO/logs/gen_bbox.log"
+                    log_path = RESULTS_ROOT / "baselines/MotionPRO/logs/gen_bbox.log"
                     log_path.parent.mkdir(parents=True, exist_ok=True)
                     with log_path.open("a") as file:
                         file.write("%s use last bbox\n" % i)

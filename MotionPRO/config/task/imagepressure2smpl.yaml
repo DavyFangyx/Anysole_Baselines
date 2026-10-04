@@ -14,11 +14,11 @@ seq_root: model-input://MotionPRO/adapter_v1/cam3
 split_csv: protocol://splits/default/splits.csv
 smpl_mean_params: asset://third_party/smpl/smpl_mean_params.npz
 smpl_model: asset://third_party/smpl/SMPL_NEUTRAL.pkl
-output_dir: results://MotionPRO/debug
+output_dir: results://baselines/MotionPRO/debug
 
-checkpoint_dir: results://MotionPRO/checkpoints
+checkpoint_dir: results://baselines/MotionPRO/checkpoints
 checkpoint_path: None
-result_dir: results://MotionPRO/metrics
+result_dir: results://baselines/MotionPRO/metrics
 
 epochs: 1000
 batch_size: 16

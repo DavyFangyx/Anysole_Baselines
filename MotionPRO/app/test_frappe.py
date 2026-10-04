@@ -44,7 +44,7 @@ def write_unified_motion(session_id, pred_by_frame, vertices_by_frame, poses_by_
             vertices[frame] = smpl_yup_to_display(vertices_by_frame[frame])
             poses[frame] = np.asarray(poses_by_frame[frame], dtype=np.float32).reshape(72)
             valid[frame] = bool(valid_by_frame.get(frame, False))
-    output = RESULTS_ROOT / "MotionPRO" / "predictions" / "eval_motion" / f"{session_id}.npz"
+    output = RESULTS_ROOT / "baselines" / "MotionPRO" / "predictions" / "eval_motion" / f"{session_id}.npz"
     output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         output,
