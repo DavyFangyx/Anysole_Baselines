@@ -115,16 +115,16 @@ cd /data/fangyuxuan/projects/gait
 前置：FPP 三 split 推理产物（② 的 fpp_predictions）必须已存在；VPoser 资产
 `models/V02_05`（.gitignore 本地资产，缺失时自 `Baselines_old/VP-MoCap/PoseTransOpt/models/` 恢复）。
 
-### pressure_tookit（优化型 · SMPLify 式）｜touch_gait
+### pressure_tookit（优化型 · SMPLify 式）｜数据侧 touch_gait · **拟合运行 mmvp**
 
 ```bash
 cd /data/fangyuxuan/projects/gait/Baselines/pressure_tookit
 
 # ① 运行（两阶段：init_shape → fit；M 口径：ICP 固定 cpu（默认）、画布 640×576（默认）、maxiters=101（config 默认）；
-#    --gpu = 物理卡号——本脚本会自行为子进程设置 CUDA_VISIBLE_DEVICES，**不要**再加前缀；
+#    ⚠️ 拟合运行必须用 mmvp（依赖 configargparse/xrprimer/open3d，touch_gait 缺）；数据侧 build_inputs 才用 touch_gait；
 #    --male/--female 必填（S14 为唯一 female；S9 整组排除不在管线）
-/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python run_full_mmvp.py --split all --stage init_shape --gpu 3 --per-gpu 4 --male S5,S6,S7,S8,S10,S11,S12,S13 --female S14
-/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python run_full_mmvp.py --split all --stage fit --gpu 3 --per-gpu 4 --male S5,S6,S7,S8,S10,S11,S12,S13 --female S14
+/data/fangyuxuan/miniconda3/envs/mmvp/bin/python run_full_mmvp.py --split all --stage init_shape --male S5,S6,S7,S8,S10,S11,S12,S13 --female S14 --gpu 3 --per-gpu 4
+/data/fangyuxuan/miniconda3/envs/mmvp/bin/python run_full_mmvp.py --split all --stage fit --male S5,S6,S7,S8,S10,S11,S12,S13 --female S14 --gpu 3 --per-gpu 4
 
 # ② 导出 motion npz → ③ 对比（SMPL-24 行；--female S14 为 S14 受试者性别口径）
 cd /data/fangyuxuan/projects/gait
