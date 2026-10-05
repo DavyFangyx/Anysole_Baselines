@@ -63,7 +63,7 @@
 
 | 编号 | 模型/对象 | 决策与改动 | commit | 证据 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| E1 | 同体系比较（主线） | 六模型正式结果全过公共 evaluator → 统一指标表 + 每模型协议说明行 | — | 两套协议：SMPL-24（AnySole/MotionPRO/PoseTransOpt/pressure_toolkit）、BVH-23（Step2Motion）、V2T（FPP-Net） | 待 T 后启动 |
+| E1 | 同体系比较（主线） | 六模型正式结果全过公共 evaluator → 统一指标表 + 每模型协议说明行 | **流程已精简（2026-10-05 用户裁定）**：'评估→导出'一体化（主库 `eval_baseline.py --model <m>`），导出不再单列步骤；MotionPRO 本已契约直写 | 两套协议：SMPL-24（AnySole/MotionPRO/PoseTransOpt/pressure_toolkit）、BVH-23（Step2Motion）、V2T（FPP-Net） | 进行中 |
 | E2 | 能力门控矩阵 | 26 键 × 六模型主矩阵 + 三条硬规则（能力≠数组存在 / provenance 不门控 / AND 三件套）；漂移点 a–k 待修订 | 主库 9de5d30（E 方案入档） | §3.3 主矩阵；逐 `—` 依据逐项可追溯 | 矩阵已成稿；E2-1 定版待裁、E2-2~6 待办 |
 | E3 | 公共 contact GT 口径 | **已裁定（2026-10-03，选项 A，已执行）**：Q1 press2Cont 顶点级（训练/评估同源）、Q2 保留公共指标（brief 第 7 键，E5 表注仅 FPP 行有值）、Q3 源头已排除（D8 清洗）+ 判据基准 31×11、Q4 重生成即 th=0.5 + 元数据自证（`contact_gt_threshold`/`pixel_weight_revision`）、Q5 contact_f1 留诊断 | `04_E` §4.6 | 重训 1410ep exit 0；三 split 140/140 session、51,772/51,772 帧；sidecar 139/140（S12102 无 temporal-5 窗口）；pixel_weight 自愈 S7 −44.3%/S11 −55.0% | 已裁定已执行 |
 | E4 | 指标口径 | foot sliding 单一公式（`metrics.py:364`，接触判据 0.3 m/s 只看 GT）+ 按协议关节集；U7 PVE 启用 vs 禁用；跨 session 尺度对齐 | — | 主模型与基线同一函数对象（`solver.py:32` 直接 import）；两套关节集 ankle↔Foot / foot↔ToeBase | E4-1 确认现状；U7 已裁定（启用）；E4-3 登记 |

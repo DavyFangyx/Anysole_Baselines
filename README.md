@@ -37,13 +37,10 @@
 cd /data/fangyuxuan/projects/gait/Baselines/MotionPRO
 CUDA_VISIBLE_DEVICES=4 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m app.train_frappe
 
-# ② 评估（T2-01a 训练收尾评估；36 session 落盘 predictions/eval_motion/）
-CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m app.test_frappe
-
-# ③ 导出统一 motion npz → ④ 进对比表（主库执行）
+# ② 评估（一体：test_frappe 直写统一契约 + 36 session 覆盖校验）
 cd /data/fangyuxuan/projects/gait
-/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model motionpro --split test --force
-
+CUDA_VISIBLE_DEVICES=2 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model motionpro --split test
+# ③ 对比
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
 ```
 
@@ -79,17 +76,11 @@ cd /data/fangyuxuan/projects/gait/Baselines/VP-MoCap/FPP-Net
 CUDA_VISIBLE_DEVICES=1 NVIDIA_TF32_OVERRIDE=0 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m app.train_temporal \
   --config configs/temporalKPSMPLCont_series5_mlp.yaml --batch_size 32 --early-stop-patience 200 --early-stop-min-delta 0.0005 --early-stop-lr-floor 5e-8 --num_threads 4 --gpus "0"
 
-# ② 三 split 推理（pred_contact_smpl → AnysoleWorkspace/work/VP-MoCap/v1/fpp_predictions/）
-for phase in train val test; do
-  CUDA_VISIBLE_DEVICES=2 NVIDIA_TF32_OVERRIDE=0 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m app.infer_smplcont \
-    --config configs/temporalKPSMPLCont_series5_mlp.yaml --phase $phase --batch_size 32 --num_threads 4 --no_visualization --gpus "0"
-done
-
-# ③ 导出 V2T sidecar（E3-A 元数据自证：press2Cont 顶点级二值 th=0.5；结果 → results/baselines/FPP-Net/predictions/v2t/）
+# ② 三 split 推理 + 导出（一体：infer → export_v2t，E3-A 元数据自证；结果 → results/baselines/FPP-Net/predictions/v2t/）
 cd /data/fangyuxuan/projects/gait
-/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/adapters/mmvp_series/fpp/export_v2t.py --split all --force
+CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model fpp_v2t --split all
 
-# ④ 对比（V2T 行；brief 第 7 键接触级仅 FPP 行有值）
+# ③ 对比（V2T 行；brief 第 7 键接触级仅 FPP 行有值）
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
 ```
 
@@ -101,14 +92,11 @@ cd /data/fangyuxuan/projects/gait
 ```bash
 cd /data/fangyuxuan/projects/gait/Baselines/VP-MoCap/PoseTransOpt
 
-# ① 运行（全量正式；split 批量，去掉 --max-iter/--max-frames 即全帧全迭代；产物 → AnysoleWorkspace/work/VP-MoCap/v1/pose_optimization/）
-#    --gpu = 原生 CUDA 设备索引（不重映射，run_full_mmvp.py:89 注释）：
-#    前缀 CUDA_VISIBLE_DEVICES=<物理号> + --gpu 0 与 无前缀 + --gpu <物理号> 等价
-CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/mmvp/bin/python run_full_mmvp.py --split test --gpu 0 --no-visualization --force
-
-# ② 导出 motion npz → ③ 对比（SMPL-24 行）
+# ① 运行 + 导出（一体：run_full_mmvp → 自动导出统一 motion npz；
+#    产物 → AnysoleWorkspace/work/VP-MoCap/v1/pose_optimization/ + results/baselines/VP-MoCap/predictions/eval_motion/）
 cd /data/fangyuxuan/projects/gait
-/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model vp_mocap --split test --force
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model vp_mocap --split test --gpu 1
+# ② 对比（SMPL-24 行）
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
 ```
 
@@ -120,15 +108,16 @@ cd /data/fangyuxuan/projects/gait
 ```bash
 cd /data/fangyuxuan/projects/gait/Baselines/pressure_tookit
 
-# ① 运行（两阶段：init_shape → fit；M 口径：ICP 固定 cpu（默认）、画布 640×576（默认）、maxiters=101（config 默认）；
-#    ⚠️ 拟合运行必须用 mmvp（依赖 configargparse/xrprimer/open3d，touch_gait 缺）；数据侧 build_inputs 才用 touch_gait；
+# ① 运行 + 导出（一体：init_shape → fit → 自动导出；M 口径：ICP 固定 cpu（默认）、画布 640×576（默认）、maxiters=101（config 默认）；
 #    --male/--female 必填（S14 为唯一 female；S9 整组排除不在管线）
-/data/fangyuxuan/miniconda3/envs/mmvp/bin/python run_full_mmvp.py --split all --stage init_shape --male S5,S6,S7,S8,S10,S11,S12,S13 --female S14 --gpu 3 --per-gpu 4
-/data/fangyuxuan/miniconda3/envs/mmvp/bin/python run_full_mmvp.py --split all --stage fit --male S5,S6,S7,S8,S10,S11,S12,S13 --female S14 --gpu 3 --per-gpu 4
-
-# ② 导出 motion npz → ③ 对比（SMPL-24 行；--female S14 为 S14 受试者性别口径）
+#    槽/W 调参（2026-10-04 A/B 实测）：槽 = 并行进程数（--per-gpu），W = 每槽 kd-tree 查询线程数
+#    单槽帧速实测 W=24: 23.2s / W=6: 26.8s / W=2: 38.5s —— W=24 只比 W=6 快 15%，线程开销却大 8-10 倍（OpenMP barrier 自旋空转计入负载）；4 槽×24 曾把 96 核机打到负载 ~180。
+#    8 槽 × w=6（推荐）  负载 ~50-60  全量 ~1.8 天  每槽=实测配置，预测最稳
+#    12 槽 × w=6        负载 ~70-85  全量 ~1.2 天  略热
+#    24 槽 × w=2        负载 ~70     全量 ~1 天     最快；24 进程并发
 cd /data/fangyuxuan/projects/gait
-/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model pressure_toolkit --split test --force
+PRESSURE_KDTREE_WORKERS=6 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model pressure_toolkit --split all --gpu 3 --per-gpu 8
+# ② 对比（SMPL-24 行）
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
 ```
 
