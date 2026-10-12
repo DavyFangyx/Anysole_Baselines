@@ -39,7 +39,8 @@ CUDA_VISIBLE_DEVICES=4 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m
 
 # ② 评估（一体：test_frappe 直写统一契约 + 36 session 覆盖校验）
 cd /data/fangyuxuan/projects/gait
-CUDA_VISIBLE_DEVICES=2 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model motionpro --split test
+CUDA_VISIBLE_DEVICES=0 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model motionpro --split test
+
 # ③ 对比
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
 ```
@@ -78,7 +79,7 @@ CUDA_VISIBLE_DEVICES=1 NVIDIA_TF32_OVERRIDE=0 /data/fangyuxuan/miniconda3/envs/t
 
 # ② 三 split 推理 + 导出（一体：infer → export_v2t，E3-A 元数据自证；结果 → results/baselines/FPP-Net/predictions/v2t/）
 cd /data/fangyuxuan/projects/gait
-CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model fpp_v2t --split all
+CUDA_VISIBLE_DEVICES=0 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model fpp_v2t --split all
 
 # ③ 对比（V2T 行；brief 第 7 键接触级仅 FPP 行有值）
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
@@ -95,7 +96,8 @@ cd /data/fangyuxuan/projects/gait/Baselines/VP-MoCap/PoseTransOpt
 # ① 运行 + 导出（一体：run_full_mmvp → 自动导出统一 motion npz；
 #    产物 → AnysoleWorkspace/work/VP-MoCap/v1/pose_optimization/ + results/baselines/VP-MoCap/predictions/eval_motion/）
 cd /data/fangyuxuan/projects/gait
-/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model vp_mocap --split test --gpu 1
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model vp_mocap --split test --gpu 0
+
 # ② 对比（SMPL-24 行）
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
 ```
@@ -114,9 +116,13 @@ cd /data/fangyuxuan/projects/gait/Baselines/pressure_tookit
 #    单槽帧速实测 W=24: 23.2s / W=6: 26.8s / W=2: 38.5s —— W=24 只比 W=6 快 15%，线程开销却大 8-10 倍（OpenMP barrier 自旋空转计入负载）；4 槽×24 曾把 96 核机打到负载 ~180。
 #    8 槽 × w=6（推荐）  负载 ~50-60  全量 ~1.8 天  每槽=实测配置，预测最稳
 #    12 槽 × w=6        负载 ~70-85  全量 ~1.2 天  略热
-#    24 槽 × w=2        负载 ~70     全量 ~1 天     最快；24 进程并发
+#    24 槽 × w=2        负载 ~70     全量 ~1 天    最快；24 进程并发
 cd /data/fangyuxuan/projects/gait
 PRESSURE_KDTREE_WORKERS=6 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/eval_baseline.py --model pressure_toolkit --split all --gpu 3 --per-gpu 8
+
+# ② 单独导出
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model pressure_toolkit --split test --force
+
 # ② 对比（SMPL-24 行）
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
 ```

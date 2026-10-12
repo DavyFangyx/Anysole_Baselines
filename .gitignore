@@ -2,8 +2,9 @@ __pycache__/
 *.pyc
 .wandb/
 wandb/
-# 偏离#3（2026-09-29）：utils 符号链接（→ ../Baselines_old/utils，第 4 步迁移叫停后的导入桥）
-# 与归档目录均不入库
-/utils
 /archive/
 VP-MoCap/PoseTransOpt/models/V02_05/
+VP-MoCap/PoseTransOpt/outputs/
+
+# 与归档目录
+Baselines_old.zip
