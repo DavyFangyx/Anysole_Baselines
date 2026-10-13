@@ -16,6 +16,10 @@ from lib.Record.record import ContRecorder
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str)
+    parser.add_argument('--cam', type=int, default=3,
+                        help='camera id (D6): datadir becomes '
+                             'model-input://FPP-Net/adapter_v1 (cam3) or '
+                             'adapter_v1/cam{N}; default 3')
     parser.add_argument('--num_threads', type=int)
     parser.add_argument('--batch_size', type=int)
     parser.add_argument('--gpus', type=str, default='cpu', help='gpu ids: e.g. 0  0,1,2, 0,2, -1 for CPU mode')
@@ -36,6 +40,8 @@ if __name__ == '__main__':
     cfg.load(arg.config)
     cfg = cfg.get_cfg()
     cfg.defrost()
+    if arg.cam != 3:
+        cfg.dataset.datadir = str(cfg.dataset.datadir).rstrip('/') + '/cam%d' % arg.cam
     cfg.num_threads = arg.num_threads
     cfg.gpus = arg.gpus
     cfg.batch_size = arg.batch_size

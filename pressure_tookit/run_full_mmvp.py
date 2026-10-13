@@ -101,7 +101,7 @@ from AnysoleWorkspace.tool.workspace import (  # noqa: E402
 # Canonical URIs: every workspace-owned path is resolved through the frozen
 # resolver, so a repository escape is rejected instead of silently creating a
 # second tree.  Only the toolkit's own entry script/config stay __file__-relative.
-ADAPTER_URI = "model-input://pressure_toolkit/v1"
+ADAPTER_URI = "model-input://pressure_toolkit/v1"  # cam3; per-camera runs override via --cam (D6)
 WORK_ROOT_URI = "work://pressure_toolkit"
 MANIFEST_URI = "protocol://manifests/session_manifest.jsonl"
 SPLITS_URI = "protocol://splits/default/splits.csv"
@@ -842,6 +842,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Gender for --subject (one queue conf = one subject)")
     parser.add_argument("--dates", default="", help="Comma-separated dates; default discovers all dates")
     parser.add_argument("--dataset", default="", help="Alias of --dates for a single date (queue conf)")
+    parser.add_argument("--cam", type=int, choices=(1, 2, 3, 4), default=3,
+                        help="camera id (四相机扩展 D6): adapter root becomes "
+                             "model-input://pressure_toolkit/v1/cam{N}; default 3")
     parser.add_argument("--split", choices=("train", "val", "test", "all"), default="all",
                         help="Discovery filter from AnysoleWorkspace/protocol/splits/default/"
                              "splits.csv.  The adapter tree holds fitting sessions, not "
@@ -1039,6 +1042,11 @@ def print_plan(ready: list[dict], skipped: list[dict], parameters: dict,
 
 def main() -> None:
     args = build_parser().parse_args()
+    # D6 (四相机扩展): per-camera adapter tree; cam3 keeps the frozen root.
+    if args.cam != 3:
+        global ADAPTER_URI, BASDIR
+        ADAPTER_URI = "%s/cam%d" % (ADAPTER_URI, args.cam)
+        BASDIR = ADAPTER_URI
     groups = group_subjects(args)
     dates = args.dates or args.dataset
     canvas = tuple(args.canvas)

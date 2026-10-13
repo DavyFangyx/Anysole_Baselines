@@ -48,9 +48,14 @@ def is_default_cam_seq_root(seq_root):
 def apply_cam_seq_root(task):
     cam_id = int(task.get('cam_id', 3))
     task['cam_id'] = cam_id
-    seq_root = str(task.get('seq_root', '') or '')
-    if is_default_cam_seq_root(seq_root):
-        task['seq_root'] = str(default_seq_root(cam_id))
+    # D6 (四相机扩展, 2026-10-13): every task field holding the default
+    # MotionPRO model-input root shape follows cam_id -- seq_root (dataset
+    # walk) plus train_data_dir / eval_data_dir (explicit dirs in the task
+    # yaml).  A non-default literal value is left untouched.
+    for key in ('seq_root', 'train_data_dir', 'eval_data_dir'):
+        value = str(task.get(key, '') or '')
+        if is_default_cam_seq_root(value):
+            task[key] = str(default_seq_root(cam_id))
     return cam_id, task['seq_root']
 
 

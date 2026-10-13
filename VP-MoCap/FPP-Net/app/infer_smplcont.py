@@ -17,6 +17,10 @@ import torch.nn.functional as F
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str)
+    parser.add_argument('--cam', type=int, default=3,
+                        help='camera id (D6): datadir becomes '
+                             'model-input://FPP-Net/adapter_v1 (cam3) or '
+                             'adapter_v1/cam{N}; default 3')
     parser.add_argument('--phase', choices=('train', 'val', 'test'), default='test')
     parser.add_argument('--num_threads', type=int, default=0)
     parser.add_argument('--batch_size', default=32, type=int,
@@ -40,6 +44,8 @@ if __name__ == '__main__':
     cfg.load(arg.config)
     cfg = cfg.get_cfg()
     cfg.defrost()
+    if arg.cam != 3:
+        cfg.dataset.datadir = str(cfg.dataset.datadir).rstrip('/') + '/cam%d' % arg.cam
     if os.environ.get('FPP_CHECKPOINT'):
         cfg.load_net_checkpoint = os.environ['FPP_CHECKPOINT']
     cfg.num_threads = arg.num_threads
