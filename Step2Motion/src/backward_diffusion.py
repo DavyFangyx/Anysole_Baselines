@@ -17,6 +17,8 @@ def model_from_config(config: Config, is_prior: bool) -> tuple[nn.Module, Option
                 d_ff=config["transformer_d_ff"],
                 dropout=config["transformer_dropout"],
                 diffusion_T=config["diffusion_T"],
+                skeleton_joint_names=config.get("skeleton_joint_names"),
+                pose_layout=config.get("pose_layout", "semantic_v1"),
             )
         else:
             model = ControlTransformer(

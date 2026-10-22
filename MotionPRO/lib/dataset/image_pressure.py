@@ -33,7 +33,7 @@ def is_default_cam_seq_root(seq_root):
     value = str(seq_root or '')
     if not value or value in ('None', 'none', 'null'):
         return True
-    normalized = Path(value).as_posix().rstrip("/")
+    normalized = value.replace("\\", "/").rstrip("/")
     if not normalized.startswith('model-input://MotionPRO/'):
         return False
     name = normalized[len('model-input://MotionPRO/'):]
@@ -55,7 +55,12 @@ def apply_cam_seq_root(task):
     for key in ('seq_root', 'train_data_dir', 'eval_data_dir'):
         value = str(task.get(key, '') or '')
         if is_default_cam_seq_root(value):
-            task[key] = str(default_seq_root(cam_id))
+            prefix = 'model-input://MotionPRO/'
+            parts = value[len(prefix):].rstrip('/').split('/') if value.startswith(prefix) else []
+            if len(parts) == 2:
+                task[key] = str(WORKSPACE_ROOT / 'model_inputs' / 'MotionPRO' / parts[0] / f'cam{cam_id}')
+            else:
+                task[key] = str(default_seq_root(cam_id))
     return cam_id, task['seq_root']
 
 
@@ -132,7 +137,14 @@ class ImagePressureDataset(Dataset):
         self.mode = mode
         self.window_length = cfg['task']['window_length']
         self.dtype = torch.float32
-        self.pressure_hw = (96, 96)
+        self.pressure_hw = tuple(int(x) for x in cfg['task'].get('pressure_hw', (96, 96)))
+        self.pressure_shape = tuple(int(x) for x in cfg['task'].get('pressure_shape', (320, 120)))
+        self.pressure_resize_mode = str(cfg['task'].get('pressure_resize_mode', 'bilinear'))
+        self.pressure_geometry_sha256 = str(cfg['task'].get('pressure_geometry_sha256', ''))
+        if self.pressure_resize_mode not in ('bilinear', 'area'):
+            raise ValueError('Unknown pressure_resize_mode: ' + self.pressure_resize_mode)
+        if len(self.pressure_hw) != 2 or min(self.pressure_hw) <= 0:
+            raise ValueError('pressure_hw must contain two positive dimensions')
 
         seq_root = resolve_seq_root(cfg)
         cam_id = cfg['task'].get('cam_id')
@@ -178,11 +190,15 @@ class ImagePressureDataset(Dataset):
             contact_file = session_dir / 'contact.npy'
             frame_id_file = session_dir / 'frame_id.npy'
 
-            pressure = np.load(pressure_file)['pressure']
-            if tuple(pressure.shape[-2:]) != (320, 120):
+            with np.load(pressure_file) as pressure_archive:
+                pressure = pressure_archive['pressure']
+                if self.pressure_geometry_sha256:
+                    if 'geometry_sha256' not in pressure_archive or str(pressure_archive['geometry_sha256']) != self.pressure_geometry_sha256:
+                        raise ValueError(f'{session_dir.name}: pressure geometry does not match config')
+            if tuple(pressure.shape[-2:]) != self.pressure_shape:
                 raise ValueError(
                     f'{session_dir.name}: pressure must be the virtual carpet '
-                    f'(T,320,120), got {tuple(pressure.shape)}')
+                    f'(T,{self.pressure_shape}), got {tuple(pressure.shape)}')
             if not contact_file.is_file():
                 raise FileNotFoundError(
                     f"Missing MotionPRO private f6 contact {contact_file}. Run "
@@ -225,6 +241,10 @@ class ImagePressureDataset(Dataset):
             raise ValueError(f'pressure must be (T, H, W), got {tuple(pressure.shape)}')
         if tuple(pressure.shape[-2:]) == (height, width):
             return pressure
+        if self.pressure_resize_mode == 'area':
+            return torch.nn.functional.interpolate(
+                pressure.unsqueeze(1), size=(height, width), mode='area',
+            ).squeeze(1)
         return torch.nn.functional.interpolate(
             pressure.unsqueeze(1),
             size=(height, width),

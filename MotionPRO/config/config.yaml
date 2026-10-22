@@ -1,6 +1,6 @@
 defaults:
     - _self_
-    - task: imagepressure2smpl
+    - task: imagepressure2smpl_carpet_v2_cam3
 
 wandb_mode: disabled
 wandb_project: MotionPRO

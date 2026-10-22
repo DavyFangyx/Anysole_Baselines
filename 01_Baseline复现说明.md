@@ -15,7 +15,7 @@
 | raw·触觉 | 左/右 PressureWasher CSV：52 列 = frame_idx/t_us/valid_mask/fake + 48 数值列（4×12/脚）；**量程（满量程/增益）无记录**（契约事实） |
 | raw·视觉 | cam3 RGB @ 40Hz（交付帧率 40Hz 为 D3 裁定） |
 | raw·动捕 | BVH-23 / Y-X-Z / cm / 120Hz / 72ch；SMPL-24 neutral + 10 betas，**y-up / m**（raw 原样交付，z-up 转换归各 adapter） |
-| splits | `protocol/splits/default/splits.csv` 实况 **104/36/36**（105 行含表头；val=test 为采集协议事实） |
+| splits | `protocol/splits/default/splits.csv` 实况 **92/12/36**（93 行含表头；val=S12、test=S13+S14，2026-10-22 裁定分离） |
 | 评估协议 | 公共 evaluator + R_Test1/2/3/4 原生协议（缺失能力标 `—`，不写 0） |
 
 细节见 `决策/01_D_数据协议.md`。
@@ -96,7 +96,7 @@
 
 ## §5 复现路径（通用五步）
 
-1. **底座已定**（§2）：raw 四部分 + splits 104/36/36 + 每日期标定 json + 评估协议，不再讨论。
+1. **底座已定**（§2）：raw 四部分 + splits 92/12/36（val=S12、test=S13+S14）+ 每日期标定 json + 评估协议，不再讨论。
 2. **中间产物由各 adapter 自产**（T1，"谁消费谁生产"）：每输入带 producer / artifact.json / 源 hash / 消费端读取测试。
 3. **原生代码改动 = 登记条目 + commit**：`git diff 111220c -- <模型>` 恰好等于该模型全部登记条目（T + M）。
 4. **M 加速开关默认关**：正式复现不用 M 路径；M 证据（开销表 + 精度 diff 表）只进对照，不进正式结果。

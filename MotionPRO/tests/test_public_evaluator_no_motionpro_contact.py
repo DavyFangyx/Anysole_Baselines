@@ -41,7 +41,8 @@ def test_motionpro_contact_stays_private():
     # produced by the MotionPRO adapter only.
     adapter = (REPO_ROOT / "AnysoleWorkspace/tool/adapters/MotionPRO/"
                "adapter.py").read_text(encoding="utf-8")
-    assert "motionpro_private_soft_f6_foot_loss_weight" in adapter
+    # T2-01c 二值回归后语义名去掉了 "soft"（soft_f6 四档为内部中间量不落盘）
+    assert "motionpro_private_f6_foot_loss_weight" in adapter
     assert "formal_metric_input" in adapter and "native_diagnostic_only" in adapter
 
 

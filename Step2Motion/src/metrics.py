@@ -9,6 +9,8 @@ from dataset import MotionDataset
 from dataset_utils import get_poses_from_data
 from normalizer import Normalizer
 from forward_diffusion import ForwardDiffusion
+from inference_windows import inference_starts, inference_window
+from skeleton_layout import metric_joint_indices
 
 
 @torch.no_grad()
@@ -133,9 +135,8 @@ def test(
     # derived from the config because gait uses 66 pose channels (69 total),
     # while the original Step2Motion data used a different skeleton width.
     pose_dim = int(config["output_dim"]) - 3
-    indices = torch.arange(
-        start=0, end=len(test_dataset) - half_temporal_stride, step=half_temporal_stride, device=device
-    )
+    indices = inference_starts(len(test_dataset.poses[0]), config["input_T"])
+    emitted_ids, emitted_valid = [], []
     test_loss_pose = 0
     test_loss_trans = 0
     gt = []
@@ -146,7 +147,12 @@ def test(
     attn_mats_chunks_body = []
     prev_x_t = None
     for i, index in enumerate(indices):
-        x_0, c, distances, _ = test_dataset[index.item()]  # type: ignore
+        x_0, c, distances, frame_ids, valid, real_length = inference_window(
+            test_dataset, index, config["input_T"])
+        emit_start = 0 if i == 0 else half_temporal_stride
+        emit_end = real_length
+        emitted_ids.append(frame_ids[emit_start:emit_end])
+        emitted_valid.append(valid[emit_start:emit_end])
         if x_0 is not None:
             x_0 = x_0.unsqueeze(0)
             x_0 = normalizer.normalize_poses(x_0)
@@ -221,61 +227,33 @@ def test(
             # root-relative and unaffected; mrpe is reported as None).
             prediction_trans = prediction_trans + x_0[..., :3]
 
-        # Loss
-        if isinstance(test_dataset, MotionDataset):
-            if i == 0:
-                loss_pose = loss_fn(x_t, pose, c)
-                loss_trans = loss_fn_trans(prediction_trans, translation)
-            else:
-                loss_pose = loss_fn(
-                    x_t[:, half_temporal_stride:], pose[:, half_temporal_stride:], c[:, half_temporal_stride:]
-                )
-                loss_trans = loss_fn_trans(
-                    prediction_trans[:, half_temporal_stride:], translation[:, half_temporal_stride:]
-                )
+        # Score and export only real, newly emitted frames. Padding is context.
+        score_mask = torch.as_tensor(valid[emit_start:emit_end], device=device)
+        if isinstance(test_dataset, MotionDataset) and score_mask.any():
+            loss_pose = loss_fn(x_t[:, emit_start:emit_end][:, score_mask],
+                                pose[:, emit_start:emit_end][:, score_mask],
+                                c[:, emit_start:emit_end][:, score_mask])
+            loss_trans = loss_fn_trans(prediction_trans[:, emit_start:emit_end][:, score_mask],
+                                       translation[:, emit_start:emit_end][:, score_mask])
             test_loss_pose += loss_pose.item()
             test_loss_trans += loss_trans.item()
-
-        # Save results
         if vertical_zero_threshold:
-            zero_th_translation_y = 5
-            prediction_trans[..., 1][abs(prediction_trans[..., 1]) < zero_th_translation_y] = 0
-        x_t = torch.cat([prediction_trans, x_t], dim=-1)
-        if i == 0:
-            if x_0 is not None:
-                gt.append(x_0[:, :half_temporal_stride])
-            else:
-                gt.append(x_t[:, :half_temporal_stride])
-            preds.append(x_t[:, :half_temporal_stride])
-            cs.append(c[:, :half_temporal_stride])
-            if return_attn_mat:
-                attn_mats_chunks_left.append(attn_mats[0][0, :, :half_temporal_stride, :half_temporal_stride])
-                attn_mats_chunks_right.append(
-                    attn_mats[0][
-                        0, :, half_temporal_stride * 2 : half_temporal_stride * 3, :half_temporal_stride
-                    ]
-                )
-                attn_mats_chunks_body.append(
-                    attn_mats[0][
-                        0, :, half_temporal_stride * 4 : half_temporal_stride * 5, :half_temporal_stride
-                    ]
-                )
-        if x_0 is not None:
-            gt.append(x_0[:, half_temporal_stride:])
-        else:
-            gt.append(x_t[:, half_temporal_stride:])
-        preds.append(x_t[:, half_temporal_stride:])
-        cs.append(c[:, half_temporal_stride:])
+            prediction_trans[..., 1][abs(prediction_trans[..., 1]) < 5] = 0
+        prediction = torch.cat([prediction_trans, x_t], dim=-1)
+        gt.append((x_0 if x_0 is not None else prediction)[:, emit_start:emit_end])
+        preds.append(prediction[:, emit_start:emit_end])
+        cs.append(c[:, emit_start:emit_end])
         if return_attn_mat:
-            attn_mats_chunks_left.append(
-                attn_mats[0][0, :, half_temporal_stride : half_temporal_stride * 2, half_temporal_stride:]
-            )
-            attn_mats_chunks_right.append(
-                attn_mats[0][0, :, half_temporal_stride * 3 : half_temporal_stride * 4, half_temporal_stride:]
-            )
-            attn_mats_chunks_body.append(
-                attn_mats[0][0, :, half_temporal_stride * 5 : half_temporal_stride * 6, half_temporal_stride:]
-            )
+            for group, chunks in enumerate([attn_mats_chunks_left, attn_mats_chunks_right, attn_mats_chunks_body]):
+                q = group * config["input_T"]
+                chunks.append(attn_mats[0][0, :, q+emit_start:q+emit_end, emit_start:emit_end])
+
+    test_dataset.inference_frame_ids = np.concatenate(emitted_ids)
+    test_dataset.inference_valid = np.concatenate(emitted_valid)
+    expected_ids = np.asarray(getattr(test_dataset, 'clip_frame_ids',
+                                     [np.arange(len(test_dataset.poses[0]))])[0])
+    if not np.array_equal(test_dataset.inference_frame_ids, expected_ids):
+        raise RuntimeError('Inference omitted, repeated, or reordered canonical frames')
 
     backward_diffusion_prior.train()
     if backward_diffusion is not None:
@@ -288,15 +266,15 @@ def test(
     return (
         test_loss_pose,
         test_loss_trans,
-        torch.cat(gt).flatten(0, 1),
-        torch.cat(preds).flatten(0, 1),
-        torch.cat(cs).flatten(0, 1),
+        torch.cat(gt, dim=1).flatten(0, 1),
+        torch.cat(preds, dim=1).flatten(0, 1),
+        torch.cat(cs, dim=1).flatten(0, 1),
         (attn_mats_chunks_left, attn_mats_chunks_right, attn_mats_chunks_body),
     )
 
 
 @torch.no_grad()
-def get_metrics(normalizer: Normalizer, y: torch.Tensor, pred: torch.Tensor, framerate: float) -> tuple[
+def get_metrics(normalizer: Normalizer, y: torch.Tensor, pred: torch.Tensor, framerate: float, joint_names=None) -> tuple[
     tuple[float, float, np.ndarray],
     tuple[float, float, np.ndarray],
     tuple[float, float, np.ndarray],
@@ -310,35 +288,27 @@ def get_metrics(normalizer: Normalizer, y: torch.Tensor, pred: torch.Tensor, fra
     """
     y = normalizer.denormalize_poses(y).cpu().numpy()  # type: ignore
     pred = normalizer.denormalize_poses(pred).cpu().numpy()  # type: ignore
-    poses_y, global_poses_y = get_poses_from_data(y, add_global_pos=False)  # type: ignore
-    poses_pred, global_poses_pred = get_poses_from_data(pred, add_global_pos=False)  # type: ignore
+    poses_y = y[:, 3:].reshape(len(y), -1, 3)
+    poses_pred = pred[:, 3:].reshape(len(pred), -1, 3)
+    global_poses_y = np.cumsum(y[:, :3], axis=0)[:, None, :]
+    global_poses_pred = np.cumsum(pred[:, :3], axis=0)[:, None, :]
+    groups = metric_joint_indices(poses_y.shape[1] + 1, joint_names)
     # mean per joint positional error
     mpjpe = np.linalg.norm(poses_y - poses_pred, axis=-1)
     mpjpe_mean = np.mean(mpjpe)
     mpjpe_std = float(np.std(mpjpe))
     # mean per end effector positional error
-    end_effectors = (
-        np.array(
-            [
-                4,
-                8,
-                13,
-                17,
-                21,
-            ]
-        )
-        - 1
-    )  # remove root joint
+    end_effectors = groups["end_effectors"]
     mpeepe = np.linalg.norm(poses_y[:, end_effectors] - poses_pred[:, end_effectors], axis=-1)
     mpeepe_mean = np.mean(mpeepe)
     mpeepe_std = float(np.std(mpeepe))
     # mean per end effector positional error (toes)
-    toes = np.array([4, 8]) - 1
+    toes = groups["toes"]
     mpeepe_toes = np.linalg.norm(poses_y[:, toes] - poses_pred[:, toes], axis=-1)
     mpeepe_toes_mean = np.mean(mpeepe_toes)
     mpeepe_toes_std = float(np.std(mpeepe_toes))
     # mean per joint positional error (legs)
-    legs = np.array([1, 2, 3, 4, 5, 6, 7, 8]) - 1
+    legs = groups["legs"]
     mpjpe_legs = np.linalg.norm(poses_y[:, legs] - poses_pred[:, legs], axis=-1)
     mpjpe_legs_mean = np.mean(mpjpe_legs)
     mpjpe_legs_std = float(np.std(mpjpe_legs))

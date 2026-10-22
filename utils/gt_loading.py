@@ -1,9 +1,9 @@
 """GT loading and prediction-archive reading on the canonical session grid.
 
-Every loader here returns data on the canonical session time grid
-(``t_mocap = visual_start_s + i/target_fps - offset_s``), the alignment used
-by MotionPRO ``prepare_sequences.py`` and ``anysole/data/dataset.py`` — so a
-prediction exported on the session grid compares frame-by-frame against GT.
+Every loader samples GT at shared ``frames.npz:mocap_time_s``. Those clocks
+already include accepted session corrections; manifest offsets can be older
+and must not be applied a second time. Prediction archives use canonical
+frame ids, while generated BVH has a separate local clock.
 """
 
 from __future__ import annotations
@@ -133,6 +133,44 @@ def resolve_repo_path(value: str, base: Path) -> Path:
     return p if p.is_absolute() else REPO_ROOT / p
 
 
+def shared_session_frames(row: dict) -> dict:
+    """Shared facts are the time authority; manifest offsets may predate corrections."""
+    explicit = row.get('shared_frames_path')
+    if explicit:
+        path = Path(explicit)
+    else:
+        camera = str(row.get('camera') or 'cam3')
+        if not camera.startswith('cam'):
+            camera = 'cam' + camera
+        candidates = sorted((REPO_ROOT / 'AnysoleWorkspace/shared/facts/sessions' / camera).glob(
+            '*/*/' + str(row['session_id']) + '/frames.npz'))
+        if len(candidates) != 1:
+            raise ValueError('Need exactly one shared frames.npz for ' + str(row['session_id']))
+        path = candidates[0]
+    with np.load(path, allow_pickle=False) as archive:
+        data = {key: np.asarray(archive[key]).copy() for key in
+                ('frame_id', 'mocap_time_s', 'visual_time_s', 'valid', 'fake')}
+    n = len(data['frame_id'])
+    if n <= 0 or not np.array_equal(data['frame_id'], np.arange(n)):
+        raise ValueError(str(path) + ': frame ids must be 0..N-1')
+    if row.get('n_frames') is not None and int(float(row['n_frames'])) != n:
+        raise ValueError(str(path) + ': manifest/shared frame counts differ')
+    for key in ('mocap_time_s', 'visual_time_s', 'valid', 'fake'):
+        if data[key].shape != (n,):
+            raise ValueError(str(path) + ': malformed ' + key)
+    for key in ('mocap_time_s', 'visual_time_s'):
+        if not np.isfinite(data[key]).all() or np.any(np.diff(data[key]) <= 0):
+            raise ValueError(str(path) + ': nonfinite or nonmonotonic ' + key)
+        if row.get('target_fps') and not np.allclose(np.diff(data[key]), 1.0/float(row['target_fps']), atol=1e-7, rtol=0):
+            raise ValueError(str(path) + ': shared clock disagrees with FPS')
+    data['source_path'] = str(path)
+    return data
+
+
+def session_time_grid(row: dict) -> np.ndarray:
+    return shared_session_frames(row)['mocap_time_s']
+
+
 def bvh_joints(path: Path, row: dict[str, str] | None = None) -> tuple[np.ndarray, tuple[str, ...], np.ndarray]:
     """Native BVH-23 world joints (+ names + parents) from a BVH file.
 
@@ -140,16 +178,9 @@ def bvh_joints(path: Path, row: dict[str, str] | None = None) -> tuple[np.ndarra
     (zero-rotation terminal nodes).  The native protocol is the 23 semantic
     joints: EndSite channels are dropped and parent indices remapped.
     Without ``row`` the raw BVH is returned as-is.  With ``row`` the motion is
-    queried at ``t_mocap = visual_start_s + i/target_fps - offset_s``.
+    queried at shared ``frames.npz:mocap_time_s``.
     """
-    query_t = None
-    if row is not None and "visual_start_s" in row and "offset_s" in row:
-        n = int(float(row.get("n_frames") or 0))
-        if n <= 0:
-            raise ValueError("manifest n_frames must be positive for aligned BVH loading")
-        fps = float(row.get("target_fps") or 40.0)
-        t_grid = float(row["visual_start_s"]) + np.arange(n, dtype=np.float64) / fps
-        query_t = t_grid - float(row["offset_s"])
+    query_t = session_time_grid(row) if row is not None else None
     loaded = load_motion(path, query_t=query_t)
     if loaded["format"] != "bvh":
         raise ValueError(f"expected legacy BVH, got {loaded['format']}: {path}")
@@ -262,9 +293,7 @@ def protocol_gt(row: dict[str, str], protocol: str) -> tuple[np.ndarray, tuple[s
         path = resolve_repo_path(row["smpl_path"], REPO_ROOT)
         n = int(float(row["n_frames"]))
         fps = float(row.get("target_fps") or 40.0)
-        query_t = (float(row["visual_start_s"])
-                   + np.arange(n, dtype=np.float64) / fps
-                   - float(row["offset_s"]))
+        query_t = session_time_grid(row)
         motion = load_motion(path, query_t=query_t)
         return motion["joints"], tuple(motion["names"])
     raise ValueError(f"unsupported protocol {protocol!r}")
@@ -276,9 +305,7 @@ def protocol_gt_surface(row: dict[str, str], protocol: str) -> dict | None:
     path = resolve_repo_path(row["smpl_path"], REPO_ROOT)
     n = int(float(row["n_frames"]))
     fps = float(row.get("target_fps") or 40.0)
-    query_t = (float(row["visual_start_s"])
-               + np.arange(n, dtype=np.float64) / fps
-               - float(row["offset_s"]))
+    query_t = session_time_grid(row)
     return load_surface(path, query_t=query_t)
 
 
@@ -288,16 +315,16 @@ def protocol_gt_rotations(row: dict[str, str], protocol: str) -> dict:
         path = resolve_repo_path(row["bvh_path"], REPO_ROOT)
         n = int(float(row.get("n_frames") or 0))
         fps = float(row.get("target_fps") or 40.0)
-        query_t = (float(row["visual_start_s"])
-                   + np.arange(n, dtype=np.float64) / fps
-                   - float(row["offset_s"]))
-        return load_rotations(path, query_t=query_t)
+        query_t = session_time_grid(row)
+        data = load_rotations(path, query_t=query_t)
+        # BVH EndSite nodes are not semantic joints in the public BVH-23 protocol.
+        order = [data['names'].index(name) for name in LEGACY_BVH_NAMES]
+        return {**data, 'rotations': np.asarray(data['rotations'])[:, order],
+                'names': tuple(LEGACY_BVH_NAMES)}
     path = resolve_repo_path(row["smpl_path"], REPO_ROOT)
     n = int(float(row["n_frames"]))
     fps = float(row.get("target_fps") or 40.0)
-    query_t = (float(row["visual_start_s"])
-               + np.arange(n, dtype=np.float64) / fps
-               - float(row["offset_s"]))
+    query_t = session_time_grid(row)
     return load_rotations(path, query_t=query_t)
 
 

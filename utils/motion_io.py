@@ -126,6 +126,12 @@ def load_rotations(path: Path, query_t: Optional[np.ndarray] = None) -> dict:
             rotations = sampled
         return {"rotations": rotations.astype(np.float32), "names": tuple(parsed["names"]), "format": "bvh"}
     with np.load(path, allow_pickle=True) as data:
+        if 'joint_rotations' in data:
+            rotations = np.asarray(data['joint_rotations'], dtype=np.float32)
+            names = tuple(str(v) for v in data['joint_names'])
+            if rotations.shape[1:] != (len(names), 3, 3):
+                raise ValueError('Malformed canonical joint_rotations: ' + str(path))
+            return dict(rotations=rotations, names=names, format='bvh')
         if "poses" in data and "vertices_world" in data:
             poses = np.asarray(data["poses"], dtype=np.float64).reshape(-1, 24, 3)
             rotations = Rotation.from_rotvec(poses.reshape(-1, 3)).as_matrix().reshape(-1, 24, 3, 3)

@@ -169,8 +169,22 @@ def main(config: Config, train_only_translation: bool) -> None:
     val_data_key = "val_data"
     test_data_key = "test_data"
     train_loader, train_dataset = create_dataloader(train_data_key, config["batch_size"])
-    val_loader, _ = create_dataloader(val_data_key, config["batch_size"])
+    val_loader, val_dataset = create_dataloader(val_data_key, config["batch_size"])
     _, test_dataset = create_dataloader(test_data_key, config["batch_size"])
+
+    groups = [set(getattr(d, 'session_ids', [])) for d in (train_dataset, val_dataset, test_dataset)]
+    if any(groups[i] & groups[j] for i, j in ((0, 1), (0, 2), (1, 2))):
+        raise ValueError('Serialized train/val/test datasets overlap. Rebuild independent split data '
+                         'and its training normalizer before semantic retraining.')
+
+    names = list(train_dataset.joint_names)
+    if config.get('skeleton_joint_names') is not None and config['skeleton_joint_names'] != names:
+        raise ValueError('Configured skeleton names differ from training data')
+    config['skeleton_joint_names'] = names
+    if config.get('pose_layout', 'semantic_v1') != 'semantic_v1':
+        raise ValueError('New training must use semantic_v1; legacy layout is diagnostic only')
+    config['pose_layout'] = 'semantic_v1'
+    copy_config(config, config['model_dir'], 'copy_config.json')
 
     print("Setting up model -----------------")
     forward_diffusion = ForwardDiffusion(T=config["diffusion_T"]).to(device)
@@ -291,6 +305,9 @@ if __name__ == "__main__":
     config["verbose"] = args.verbose
 
     config["model_dir"] = os.path.join(config["models_dir"], f"{config['name']}")
+    if any(os.path.exists(os.path.join(config['model_dir'], name))
+           for name in ('model_prior.pth', 'model.pth', 'model_trans.pth')):
+        raise FileExistsError('Choose a fresh model name; historical checkpoints must be retained')
     copy_config(config, config["model_dir"], "copy_config.json")
 
     np.random.seed(config["seed"])

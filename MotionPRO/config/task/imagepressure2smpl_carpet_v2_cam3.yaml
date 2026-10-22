@@ -1,0 +1,35 @@
+name: imagepressure2smpl_carpet_v2
+loss_name: init
+gpu: 0
+train_data_dir: model-input://MotionPRO/adapter_v2_carpet/cam3
+eval_data_dir: model-input://MotionPRO/adapter_v2_carpet/cam3
+cam_id: 3
+seq_root: model-input://MotionPRO/adapter_v2_carpet/cam3
+split_csv: protocol://splits/default/splits.csv
+smpl_mean_params: asset://third_party/smpl/smpl_mean_params.npz
+smpl_model: asset://third_party/smpl/SMPL_NEUTRAL.pkl
+output_dir: results://baselines/MotionPRO/debug
+checkpoint_dir: results://baselines/MotionPRO/checkpoints
+checkpoint_path: null
+result_dir: results://baselines/MotionPRO/metrics
+epochs: 1000
+batch_size: 16
+learning_rate: 5.0e-05
+train_continue: false
+scheduler_patience: 5
+window_length: 20
+eval_fps: 40
+lamda_theta: 1
+lamda_trans: 1
+lamda_joint: 10
+lamda_2d_joint: 5
+lamda_foot: 5
+pressure_shape:
+- 430
+- 200
+pressure_hw:
+- 258
+- 160
+pressure_resize_mode: area
+pressure_geometry_sha256: 195e86cc30cb61fb056d690fccc25c0883c877930482f5b86af88015049187df
+unified_prediction_dir: results://baselines/MotionPRO/predictions/carpet_v2/eval_motion

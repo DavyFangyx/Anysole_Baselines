@@ -5,6 +5,7 @@ from typing import Optional
 from prior_transformer_decoder_layer import PriorTransformerDecoderLayer
 from control_transformer_decoder_layer import ControlTransformerDecoderLayer
 from utils import SinusoidalPositionalEncoding
+from skeleton_layout import joint_names, pose_channel_order
 
 
 class TransformerTranslation(nn.Module):
@@ -254,6 +255,8 @@ class PriorTransformer(nn.Module):
         d_ff: int,
         dropout: float,
         diffusion_T: int,
+        skeleton_joint_names=None,
+        pose_layout: str = "semantic_v1",
     ) -> None:
         super(PriorTransformer, self).__init__()
 
@@ -261,6 +264,15 @@ class PriorTransformer(nn.Module):
         self.translation_dim = 3
         self.pose_dim = output_dim - self.translation_dim
         self.n_joints = self.pose_dim // 3
+        self.skeleton_joint_names = joint_names(self.n_joints + 1, skeleton_joint_names)
+        if pose_layout not in ('semantic_v1', 'legacy_positional'):
+            raise ValueError('Unknown pose_layout: ' + pose_layout)
+        self.pose_layout = pose_layout
+        order = (pose_channel_order(self.n_joints + 1, self.skeleton_joint_names)
+                 if pose_layout == 'semantic_v1' else list(range(self.pose_dim)))
+        self.register_buffer('pose_group_order', torch.tensor(order, dtype=torch.long),
+                             persistent=pose_layout == 'semantic_v1')
+        self.register_buffer('pose_ungroup_order', torch.argsort(self.pose_group_order), persistent=False)
         # self.distances_dim = self.pose_dim // 3
 
         self.left_leg_emb = nn.Linear(3 * 4, hidden_dim)
@@ -315,9 +327,10 @@ class PriorTransformer(nn.Module):
             c_emb = control.forward_condition_emb(c, distances, t_emb, c_mask)
         # Pose prediction
         temporality = x.shape[1]
-        left_leg = x[..., : 4 * 3]
-        right_leg = x[..., 4 * 3 : 8 * 3]
-        body = x[..., 8 * 3 :]
+        grouped_x = x.index_select(-1, self.pose_group_order)
+        left_leg = grouped_x[..., : 4 * 3]
+        right_leg = grouped_x[..., 4 * 3 : 8 * 3]
+        body = grouped_x[..., 8 * 3 :]
         left_leg = self.left_leg_emb(left_leg)
         right_leg = self.right_leg_emb(right_leg)
         body = self.body_emb(body)
@@ -344,7 +357,18 @@ class PriorTransformer(nn.Module):
         right_leg = self.out_proj_right_leg(right_leg)
         body = self.out_proj_body(body)
         pose = torch.cat([left_leg, right_leg, body], dim=-1)
+        pose = pose.index_select(-1, self.pose_ungroup_order)
         return pose, attn_mats
+
+    def load_state_dict(self, state_dict, strict=True, **kwargs):
+        saved = state_dict.get('pose_group_order')
+        if self.pose_layout == 'semantic_v1':
+            if saved is None:
+                raise RuntimeError('Legacy positional checkpoint: retrain for semantic_v1; '
+                                   'pose_layout=legacy_positional is only for historical diagnosis.')
+            if not torch.equal(saved.cpu(), self.pose_group_order.cpu()):
+                raise RuntimeError('Checkpoint skeleton layout differs from configured joint names')
+        return super().load_state_dict(state_dict, strict=strict, **kwargs)
 
     def set_normalizer_id(self, id: int) -> None:
         self.register_buffer("normalizer_id", torch.tensor(id))

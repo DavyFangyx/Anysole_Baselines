@@ -30,7 +30,7 @@ def smpl_yup_to_display(points):
 
 
 def write_unified_motion(session_id, pred_by_frame, vertices_by_frame, poses_by_frame,
-                         valid_by_frame, n_frames, checkpoint_path):
+                         valid_by_frame, n_frames, checkpoint_path, output_dir=None):
     """Write one MotionPRO session in the shared SMPL-24 eval_motion contract."""
     joints = np.zeros((n_frames, 24, 3), dtype=np.float32)
     sample_vertices = next(iter(vertices_by_frame.values()))
@@ -44,7 +44,8 @@ def write_unified_motion(session_id, pred_by_frame, vertices_by_frame, poses_by_
             vertices[frame] = smpl_yup_to_display(vertices_by_frame[frame])
             poses[frame] = np.asarray(poses_by_frame[frame], dtype=np.float32).reshape(72)
             valid[frame] = bool(valid_by_frame.get(frame, False))
-    output = RESULTS_ROOT / "baselines" / "MotionPRO" / "predictions" / "eval_motion" / f"{session_id}.npz"
+    directory = Path(output_dir) if output_dir is not None else RESULTS_ROOT / "baselines" / "MotionPRO" / "predictions" / "eval_motion"
+    output = directory / f"{session_id}.npz"
     output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         output,
@@ -245,6 +246,8 @@ def evaluate_checkpoint(cfg, checkpoint_path, result_dir, device=None):
             canonical_valid[sid],
             sessions[sid].n_frames,
             checkpoint_path,
+            output_dir=(resolve_workspace_path(cfg['task']['unified_prediction_dir'])
+                        if cfg['task'].get('unified_prediction_dir') else None),
         )
 
     csv_path, log_path = write_metrics_files(rows, result_dir, fps=fps)

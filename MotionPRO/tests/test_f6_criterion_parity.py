@@ -46,19 +46,14 @@ def test_states_and_loaded_match():
 
 
 def test_soft_values_match():
+    # T2-01c（2026-10-03 用户裁定）：contact.npy 回归原生二值契约 {0,1}
+    # （= motion_f6 硬决策）；四档软值 {0.05,0.3,0.7,0.95} 为内部中间量不落盘。
     from AnysoleWorkspace.tool.adapters.MotionPRO.adapter import load_shared_session
     session = load_shared_session(SESSION_ID)
     contact = soft_f6_contact(motionpro_context(session))
     states_a, loaded_a = anyspace_pipeline(anyspace_context(session))
-    expected = np.zeros((contact.shape[0], 2), dtype=np.float32)
-    for column in range(2):
-        state, loaded = states_a[:, column], loaded_a[:, column]
-        values = np.zeros(len(state), dtype=np.float32)
-        values[state == 1] = np.where(loaded[state == 1], 0.95, 0.70)
-        values[state == 0] = np.where(loaded[state == 0], 0.30, 0.05)
-        expected[:, column] = values
-    assert np.array_equal(contact[:, 6], expected[:, 0]), "left soft values differ"
-    assert np.array_equal(contact[:, 7], expected[:, 1]), "right soft values differ"
+    assert np.array_equal(contact[:, 6], states_a[:, 0]), "left binary contact differs from motion_f6"
+    assert np.array_equal(contact[:, 7], states_a[:, 1]), "right binary contact differs from motion_f6"
 
 
 if __name__ == "__main__":

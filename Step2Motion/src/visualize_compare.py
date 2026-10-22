@@ -13,7 +13,7 @@ import sys
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_RENDERER = _REPO_ROOT / "results_display" / "script" / "r_test1_visualize_step2motion.py"
+_RENDERER = _REPO_ROOT / "results_display" / "script" / "legacy" / "r_test1_visualize_step2motion.py"
 if not _RENDERER.is_file():
     raise ImportError("Step2Motion visualization renderer not found: %s" % _RENDERER)
 
@@ -33,7 +33,7 @@ try:
     # ``src/test.py`` already imports Step2Motion's own ``utils.py`` under the
     # name ``utils``, which would shadow the results_display package the
     # renderer imports from.  Swap the package in for the exec, restore after.
-    _utils_pkg_path = _RENDERER.parent / "utils"
+    _utils_pkg_path = _RENDERER.parent.parent / "utils"
     if str(_utils_pkg_path) not in (
             getattr(sys.modules.get("utils"), "__path__", []) or []):
         _saved_modules["utils"] = sys.modules.get("utils")
@@ -60,7 +60,7 @@ finally:
 DEFAULT_VIZ_DIR = (
     _module.DEFAULT_VIZ_DIR
     if _module is not None
-    else _REPO_ROOT / "results_display" / "Test1_visualization" / "Step2Motion" / "gait_model"
+    else _REPO_ROOT / "results_display" / "ResultTest" / "R1Test_visualize" / "Step2Motion" / "gait_model"
 )
 
 

@@ -4,7 +4,7 @@
 MotionPRO reads the canonical split and must never write it (M4).  This
 command only checks the structural invariants MotionPRO relies on:
 
-  - val equals test;
+  - val differs from test (2026-10-22 ruling; val=S12, test=S13+S14);
   - no duplicate session ids within or across columns;
   - subjects are disjoint between train and val/test (no leakage);
   - every listed session exists in shared facts.
@@ -73,18 +73,25 @@ def validate(path: Path, facts_root: Path) -> list[str]:
     columns = read_columns(Path(path))
 
     val_set, test_set = set(columns.get("val", [])), set(columns.get("test", []))
-    if val_set != test_set:
-        errors.append("val and test columns differ (canonical protocol sets val=test)")
+    if val_set == test_set:
+        errors.append("val and test columns are identical (2026-10-22 ruling requires val != test)")
 
     all_ids = [sid for ids in columns.values() for sid in ids]
-    # val==test by protocol, so duplicates are only an error *within* one
-    # column; a train session leaked into val/test is caught by the subject
-    # disjointness check below.
+    # val/test are disjoint by ruling; a session appearing in two columns
+    # (other than within-column duplicates) is an error, and a train session
+    # leaked into val/test is caught by the subject disjointness check below.
     for column in ("train", "val", "test"):
         ids = columns.get(column, [])
         duplicates = sorted({sid for sid in ids if ids.count(sid) > 1})
         if duplicates:
             errors.append(f"duplicate session ids in {column}: {duplicates}")
+
+    seen: dict[str, str] = {}
+    for column, ids in columns.items():
+        for sid in ids:
+            if sid in seen:
+                errors.append(f"session {sid} appears in both {seen[sid]} and {column}")
+            seen[sid] = column
 
     train_subjects = {session_subject(sid) for sid in columns.get("train", [])}
     eval_subjects = {session_subject(sid) for sid in columns.get("val", []) + columns.get("test", [])}

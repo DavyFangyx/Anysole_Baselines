@@ -94,6 +94,9 @@ def _temp_config(root, split):
             ("prediction_root", "'%s'" % (root / "predictions")),
             ("essentials_root", "'%s'" % (FPP_ROOT / "essentials")),
             ("result_path", "'%s'" % (root / "metrics")),
+            # 2026-10-22: 缺失 checkpoint 用例必须把真实训练产物路径也指空，
+            # 否则 load() 会解析到磁盘上存在的 FPP ckpt，用例失去意义。
+            ("load_net_checkpoint", "'%s'" % (root / "missing_ckpt")),
     ):
         lines = []
         for line in text.splitlines():

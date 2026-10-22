@@ -19,6 +19,7 @@ from utils import skeleton_pos_to_rot
 from visualize_compare import DEFAULT_VIZ_DIR, visualize_from_exports
 from bvh_export import joint_names_for_count, write_bvh
 from workspace import DISPLAY_ROOT, RESULTS_ROOT, normalizer_path, resolve_path
+from prediction_export import export_canonical_motion
 
 
 def pred_to_bvh(
@@ -178,7 +179,7 @@ def run_clip(
     )
     print(f"Test Loss Pose: {loss_pose:.5f} - Test Loss Translation: {loss_trans:.5f}")
     mpjpe, mpeepe, mrpe, mpjpe_legs, mpjve_legs, mpeepe_legs = get_metrics(
-        normalizer, gt, pred, clip_dataset.sample_rate
+        normalizer, gt, pred, clip_dataset.sample_rate, joint_names=clip_dataset.joint_names
     )
     if model_trans is None:
         # --no-imu ablation: translation is the GT fallback, so the
@@ -209,6 +210,10 @@ def run_clip(
     if seed is not None:
         pred_path = pred_path.replace(".bvh", f"_s{seed}.bvh")
     pred_to_bvh(pred, 0, clip_dataset, normalizer, pred_path)
+    canonical_path = None
+    if getattr(clip_dataset, 'session_ids', None) and name.startswith('S'):
+        canonical_path = export_canonical_motion(
+            pred_path, clip_dataset, config['model_dir'], bw_diff_pose_prior.pose_layout)
     cs_path = os.path.join(output_dir, name + "_cs.json")
     cs_to_json(cs, clip_dataset, normalizer, cs_path)
     raw_path, raw_start = raw_bvh_info(clip_dataset, name)
@@ -219,6 +224,10 @@ def run_clip(
                 "raw_bvh_path": raw_path,
                 "raw_start_time": raw_start,
                 "fps": float(clip_dataset.sample_rate),
+                "pose_layout": bw_diff_pose_prior.pose_layout,
+                "frame_indices": clip_dataset.inference_frame_ids.tolist(),
+                "valid_mask": clip_dataset.inference_valid.tolist(),
+                "canonical_prediction": str(canonical_path) if canonical_path else None,
             },
             handle,
             indent=2,
@@ -282,6 +291,11 @@ def main(
 
     print("Setting up models -----------------")
     forward_diffusion = ForwardDiffusion(T=config["diffusion_T"]).to(device)
+    dataset = MotionDataset.load(dataset_path, device)
+    names = list(dataset.joint_names)
+    if config.get('skeleton_joint_names') is not None and config['skeleton_joint_names'] != names:
+        raise ValueError('Configured skeleton names differ from inference data')
+    config['skeleton_joint_names'] = names
     bw_diff_pose_prior, _ = model_from_config(config, is_prior=True)
     bw_diff_pose_prior.to(device)
     bw_diff_pose = None
@@ -309,7 +323,6 @@ def main(
         assert model_trans.normalizer_id.item() == normalizer.id
 
     print("Setting up datasets -----------------")
-    dataset = MotionDataset.load(dataset_path, device)
     n_clips = dataset.n_clips()
     if clip is None:
         clip_ids = list(range(n_clips))
@@ -372,6 +385,10 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("model_dir", type=str, help="Path to the model directory")
+    parser.add_argument('--legacy-positional', action='store_true',
+                        help='Use historical positional weights for diagnosis; this does not fix their learned grouping.')
+    parser.add_argument('--output-dir', type=str, default=None,
+                        help='New output directory; historical predictions are retained by default.')
     parser.add_argument(
         "--dataset", type=str, default="from_config_file", help="Path of the dataset to use for prediction"
     )
@@ -422,8 +439,12 @@ if __name__ == "__main__":
     config = load_config(config_path)
 
     config["model_dir"] = args.model_dir
+    if args.legacy_positional:
+        config['pose_layout'] = 'legacy_positional'
     model_name = os.path.basename(os.path.normpath(args.model_dir))
-    config["predictions_dir"] = str(RESULTS_ROOT / "baselines/Step2Motion/predictions" / model_name)
+    suffix = '_legacy_tail_v2' if config.get('pose_layout') == 'legacy_positional' else '_semantic_v2'
+    config["predictions_dir"] = (resolve_path(args.output_dir) if args.output_dir else
+                                 str(RESULTS_ROOT / "baselines/Step2Motion/predictions" / (model_name + suffix)))
     config["visualizations_dir"] = str(DISPLAY_ROOT / "Step2Motion" / model_name)
 
     dataset_path = args.dataset

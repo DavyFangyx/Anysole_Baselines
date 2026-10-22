@@ -50,13 +50,15 @@ CUDA_VISIBLE_DEVICES=0 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python An
 ### Step2Motion（学习型 · 条件扩散）｜touch_gait（py3.8）
 
 ```bash
-# ① 训练（M8 口径 epochs_pose=100 / epochs_trans=200；ckpt → results/baselines/Step2Motion/checkpoints/gait_model/）
+# ① 训练（M8 口径 epochs_pose=100 / epochs_trans=200；ckpt → results/baselines/Step2Motion/checkpoints/gait_model/；
+#    旧 legacy-positional ckpt 已删 2026-10-22，新训练为 semantic_v1 从零）
 cd /data/fangyuxuan/projects/gait/Baselines/Step2Motion
 CUDA_VISIBLE_DEVICES=4 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python src/train.py --config configs/config_gait.json
 # 无 IMU 变体（38 维输入，数据集 gait_noimu/）：
 # ... src/train.py --config configs/config_gait.json --no-imu
 
-# ② 评估（zyx 导出修正已登记；默认 dataset 取 config 内 test_data）
+# ② 评估（zyx 导出修正已登记；默认 dataset 取 config 内 test_data；
+#    待 ① 训出 semantic_v1 ckpt 后指向该目录；旧 ckpt 已删 2026-10-22）
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python src/test.py \
   /data/fangyuxuan/projects/gait/results/baselines/Step2Motion/checkpoints/gait_model
 
@@ -65,14 +67,15 @@ cd /data/fangyuxuan/projects/gait
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
 ```
 
-注意：legs/toes 指标名实不符为已登记偏差；正式结果需 ① 重训（旧 ckpt 09-22/09-28 换代）。
+注意：legs/toes 指标修复已随 semantic 重构落地（2026-10-22）。
 
 ### FPP-Net（学习型 · V2T 时序网络）｜touch_gait（**numpy<2 铁律**）
 
 ```bash
 cd /data/fangyuxuan/projects/gait/Baselines/VP-MoCap/FPP-Net
 
-# ① 训练（M12 口径；2026-10-03 实测 1410ep ≈13.6h；ckpt → results/baselines/FPP-Net/checkpoints/tempKPSMPL_series5_mlp/） 
+# ① 训练（M12 口径；2026-10-03 实测 1410ep ≈13.6h；ckpt → results/baselines/FPP-Net/checkpoints/tempKPSMPL_series5_mlp/；
+#    旧 ckpt 已移出（2026-10-22），本命令从零训）
 # 早停默认关闭（yaml=0，保持原生 1410 epoch 行为）
 CUDA_VISIBLE_DEVICES=1 NVIDIA_TF32_OVERRIDE=0 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m app.train_temporal \
   --config configs/temporalKPSMPLCont_series5_mlp.yaml --batch_size 32 --early-stop-patience 200 --early-stop-min-delta 0.0005 --early-stop-lr-floor 5e-8 --num_threads 4 --gpus "0"
@@ -88,7 +91,7 @@ CUDA_VISIBLE_DEVICES=0 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python An
 注意：任何 build/导出步骤禁用 numpy≥2 的 python（P1 实测会写坏 pickle）；数据重建
 = `AnysoleWorkspace/tool/adapters/mmvp_series/fpp/build_inputs.py --force` + `build_metadata.py --force`。
 
-### PoseTransOpt（VP-MoCap · 优化型逐帧优化）｜**mmvp**（需 open3d）
+### PoseTransOpt（VP-MoCap 后 · 优化型逐帧优化）｜**mmvp**
 
 ```bash
 cd /data/fangyuxuan/projects/gait/Baselines/VP-MoCap/PoseTransOpt
@@ -110,7 +113,10 @@ cd /data/fangyuxuan/projects/gait
 ```bash
 cd /data/fangyuxuan/projects/gait/Baselines/pressure_tookit
 
-# ① 运行 + 导出（一体：init_shape → fit → 自动导出；M 口径：ICP 固定 cpu（默认）、画布 640×576（默认）、maxiters=101（config 默认）；
+# ① 运行 + 导出（一体：init_shape → fit → 自动导出；导出需
+#    protocol/calibration/<date>.pressure_toolkit_native_to_mocap.json（目前仅 20260810 有，
+#    新日期需先拟合再 native_to_mocap.py --date <日期>）。
+#    M 口径：ICP 固定 cpu（默认）、画布 640×576（默认）、maxiters=101（config 默认）；
 #    --male/--female 必填（S14 为唯一 female；S9 整组排除不在管线）
 #    槽/W 调参（2026-10-04 A/B 实测）：槽 = 并行进程数（--per-gpu），W = 每槽 kd-tree 查询线程数
 #    单槽帧速实测 W=24: 23.2s / W=6: 26.8s / W=2: 38.5s —— W=24 只比 W=6 快 15%，线程开销却大 8-10 倍（OpenMP barrier 自旋空转计入负载）；4 槽×24 曾把 96 核机打到负载 ~180。

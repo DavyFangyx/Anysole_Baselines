@@ -273,7 +273,7 @@ class MotionDataset(Dataset):
             self.clip_indices = self.clip_indices[clip : clip + 1]
         if getattr(self, "n_session_clips", None):
             self.n_session_clips = self.n_session_clips[clip : clip + 1]
-        for attribute in ("raw_bvh_paths", "raw_start_times", "raw_end_times"):
+        for attribute in ("raw_bvh_paths", "raw_start_times", "raw_end_times", "clip_frame_ids", "clip_valid"):
             values = getattr(self, attribute, None)
             if values:
                 setattr(self, attribute, values[clip : clip + 1])

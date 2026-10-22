@@ -47,14 +47,15 @@ def test_corrupted_split_fails():
     columns = _read(CANONICAL)
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
-        # val != test violates the canonical protocol invariant
+        # val == test violates the canonical protocol invariant
+        # (2026-10-22: val 与 test 分离后，"identical" 才是损坏形态)
         bad = base / "bad_val_test.csv"
         with bad.open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=["index", "train", "val", "test"])
             writer.writeheader()
-            writer.writerow({"train": "S10101", "val": "S13011", "test": "S13012"})
+            writer.writerow({"train": "S10101", "val": "S13011", "test": "S13011"})
         errors = validate(bad, FACTS_ROOT)
-        assert any("differ" in error for error in errors), errors
+        assert any("identical" in error for error in errors), errors
 
         # duplicate + leakage: put a train session into test
         dup = base / "bad_dup.csv"
@@ -71,7 +72,7 @@ def test_corrupted_split_fails():
                     "test": (train[0] if i == 0 else test[i]) if i < len(test) else "",
                 })
         errors = validate(dup, FACTS_ROOT)
-        assert any("differ" in error for error in errors), errors
+        assert any("appears in both" in error for error in errors), errors
         assert any("leakage" in error for error in errors), errors
 
 
@@ -96,7 +97,7 @@ def test_session_existence_check():
             for i in range(max(len(train), len(columns["test"]))):
                 writer.writerow({
                     "train": train[i] if i < len(train) else "",
-                    "val": columns["test"][i] if i < len(columns["test"]) else "",
+                    "val": columns["val"][i] if i < len(columns["val"]) else "",
                     "test": "S99999" if i == 0 else columns["test"][i] if i < len(columns["test"]) else "",
                 })
         errors = validate(missing, FACTS_ROOT)

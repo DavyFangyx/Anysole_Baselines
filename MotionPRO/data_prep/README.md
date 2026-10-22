@@ -25,7 +25,7 @@ artifact.json     # 声明 contact 语义 + 转换口径
 ## Split：只读验证
 
 canonical split 位于 `../../AnysoleWorkspace/protocol/splits/default/splits.csv`
-（92/12/36，val=test，已冻结）。MotionPRO 不得自行划分；`make_splits.py`
+（92/12/36，val=S12、test=S13+S14，2026-10-22 裁定 val 与 test 分离）。MotionPRO 不得自行划分；`make_splits.py`
 只做只读验证（计数、去重、受试者隔离、session 存在性），不写任何文件：
 
 ```bash

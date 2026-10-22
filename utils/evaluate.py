@@ -49,6 +49,8 @@ from Baselines.utils.gt_loading import (
     read_manifest,
     resolve_repo_path,
     valid_mask,
+    session_time_grid,
+    shared_session_frames,
 )
 from Baselines.utils.protocols import (
     PROTOCOL_FORWARD_AXIS,
@@ -125,10 +127,8 @@ def _capabilities(entry: dict[str, Any], archive: dict[str, Any] | None = None):
 
 
 def _session_time_grid(row: dict[str, str]) -> np.ndarray:
-    """Canonical mocap time axis: t_mocap = visual_start_s + i/fps - offset_s."""
-    n = int(float(row["n_frames"]))
-    fps = float(row.get("target_fps") or 40.0)
-    return float(row["visual_start_s"]) + np.arange(n, dtype=np.float64) / fps - float(row["offset_s"])
+    """Canonical time comes from shared facts, with corrections already applied."""
+    return session_time_grid(row)
 
 
 def _gt_source_path(row: dict[str, str], protocol: str) -> str:
@@ -187,8 +187,9 @@ def evaluate_motion_row(entry: dict[str, Any], row: dict[str, str],
         if declared == "pressure":
             raise ValueError("pressure rows use evaluate_pressure_row")
         if pred_path.suffix.lower() == ".bvh":
-            pred, pred_names, _parents = bvh_joints(pred_path, row)
-            pred_mask = None
+            # Generated BVH starts at local time zero, not the raw mocap epoch.
+            from Baselines.utils.prediction_grid import bvh_prediction_on_grid
+            pred, pred_mask, pred_names, bvh_rotations = bvh_prediction_on_grid(pred_path, row)
             protocol = "bvh23"
         else:
             pred, pred_mask, pred_names, protocol_label = array_from_file(pred_path)
@@ -208,8 +209,10 @@ def evaluate_motion_row(entry: dict[str, Any], row: dict[str, str],
             raise ValueError(
                 f"unified motion archive mask={len(pred_mask)}; canonical session={expected}"
             )
-        gt, gt_names = gt_cache.setdefault((row["session_id"], protocol),
-                                           protocol_gt(row, protocol))
+        gt_key = (row["session_id"], protocol)
+        if gt_key not in gt_cache:
+            gt_cache[gt_key] = protocol_gt(row, protocol)
+        gt, gt_names = gt_cache[gt_key]
         base["protocol"] = PROTOCOL_LABELS[protocol]
         base["gt_source"] = _gt_source_path(row, protocol)
         if not caps.get("joint_positions", False):
@@ -226,13 +229,27 @@ def evaluate_motion_row(entry: dict[str, Any], row: dict[str, str],
         pred_rotations = gt_rotations = None
         if want_rotations:
             from Baselines.utils.motion_io import load_rotations
-            pred_rotation_data = load_rotations(pred_path)
+            pred_rotation_data = (dict(rotations=bvh_rotations) if pred_path.suffix.lower() == '.bvh'
+                                  else load_rotations(pred_path))
             cache_key = (row["session_id"], protocol)
             gt_rotation_data = gt_rotation_cache.setdefault(
                 cache_key, protocol_gt_rotations(row, protocol)
             )
             pred_rotations = np.asarray(pred_rotation_data["rotations"], dtype=np.float64)
             gt_rotations = np.asarray(gt_rotation_data["rotations"], dtype=np.float64)
+            # 帧数对齐（2026-10-22 S14012 修复）：旋转/表面通道未随 n_eval
+            # 截断时，keep 布尔索引与通道长度不一致（canonical 451 帧 vs
+            # S2M 导出 450 帧）→ solver 内 boolean index 崩溃。所有通道
+            # 一律截断到 n_eval；上游导出少一帧的旋转通道以末帧补齐
+            # （S2M BVH 出口一帧短，属上游容差）。
+            if len(pred_rotations) == n_eval - 1:
+                pred_rotations = np.concatenate(
+                    [pred_rotations, pred_rotations[-1:]], axis=0)
+            if len(gt_rotations) == n_eval - 1:
+                gt_rotations = np.concatenate(
+                    [gt_rotations, gt_rotations[-1:]], axis=0)
+            pred_rotations = pred_rotations[:n_eval]
+            gt_rotations = gt_rotations[:n_eval]
 
         pred_vertices = gt_vertices = None
         public_surface = str(archive_info.get("public_surface_metrics", "true")).strip().lower()
@@ -252,11 +269,15 @@ def evaluate_motion_row(entry: dict[str, Any], row: dict[str, str],
                     reasons["pve_mm"] = "not_computed: no surface in archive"
                 else:
                     pred_vertices = pred_surface.get("vertices")
+                    if pred_vertices is not None:
+                        pred_vertices = pred_vertices[:n_eval]
                     cache_key = (row["session_id"], protocol)
                     if cache_key not in gt_surface_cache:
                         gt_surface_cache[cache_key] = protocol_gt_surface(row, protocol)
                     gt_surface = gt_surface_cache[cache_key]
                     gt_vertices = gt_surface.get("vertices") if gt_surface else None
+                    if gt_vertices is not None:
+                        gt_vertices = gt_vertices[:n_eval]
         elif "pve_mm" in applicable and public_surface in {"0", "false", "no"}:
             reasons["pve_mm"] = "not_applicable: archive public_surface_metrics=false"
         elif "pve_mm" in applicable:
@@ -344,10 +365,25 @@ def write_comparison(entry: dict[str, Any], split: str, split_csv: Path,
         try:
             existing = json.loads(output.read_text(encoding="utf-8"))
             if str(existing.get("schema_version")) == COMPARISON_SCHEMA_V2:
+                if entry.get('protocol') == 'pressure':
+                    print(f"skip existing {output} (--force to overwrite)")
+                    return output
+                if existing.get('time_axis_policy') != 'shared corrections already applied; manifest offset is not reapplied':
+                    raise FileExistsError('Existing metrics use the old/undeclared clock: ' + str(output) +
+                                          '; preserve them and use a fresh result root or explicitly --force.')
+                expected_hashes = {
+                    str(row['session_id']): __import__('hashlib').sha256(
+                        Path(shared_session_frames(row)['source_path']).read_bytes()).hexdigest()
+                    for row in rows if row.get('session_id') and entry.get('protocol') != 'pressure'
+                }
+                if existing.get('shared_time_hashes') != expected_hashes:
+                    raise FileExistsError('Shared time inputs changed; use a fresh result root or explicitly --force.')
                 print(f"skip existing {output} (--force to overwrite)")
                 return output
             if str(existing.get("schema_version")) == LEGACY_SCHEMA_V1:
                 print(f"[legacy] {output}: schema v1 (common19) superseded, rewriting as v2")
+        except FileExistsError:
+            raise
         except (ValueError, OSError):
             pass
     metric_rows = []
@@ -376,6 +412,13 @@ def write_comparison(entry: dict[str, Any], split: str, split_csv: Path,
         "applicable_metrics": sorted(applicable),
         "gt_source": gt_source,
         "surface_metrics": bool(surface_metrics),
+        "time_axis_source": "shared/facts/sessions/<camera>/<date>/<subject>/<session>/frames.npz:mocap_time_s",
+        "time_axis_policy": "shared corrections already applied; manifest offset is not reapplied",
+        "shared_time_hashes": {
+            str(row['session_id']): __import__('hashlib').sha256(
+                Path(shared_session_frames(row)['source_path']).read_bytes()).hexdigest()
+            for row in rows if row.get('session_id') and entry.get('protocol') != 'pressure'
+        },
         "evaluation_fps": float(summary.get("eval_fps", 40.0)),
         "units": {
             "*_mm": "millimetres",
