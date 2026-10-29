@@ -1,13 +1,16 @@
 # Baselines（Anysole_Baselines）
 
-四个基线模型的原生代码仓库。远程：https://github.com/DavyFangyx/Anysole_Baselines.git
+七个基线模型的原生代码仓库。远程：https://github.com/DavyFangyx/Anysole_Baselines.git
 
-| 模型目录 | 上游来源（见 `upstream_commits.md`） |
+| 模型目录 | 上游来源（见 `决策/` 档案；`upstream_commits.md` 已于 2026-09-29 废止） |
 | --- | --- |
 | `MotionPRO/` | wjrzm/MotionPRO @ 325f485 |
 | `Step2Motion/` | JLPM22/Step2Motion @ a7bdc40 |
 | `VP-MoCap/` | wjrzm/VP-MoCap @ b88fce8 |
 | `pressure_tookit/` | haolyuan/pressure_tookit @ 305969f |
+| `WHAM/` | 传输包 visual_baselines_20261029 包快照（见 `决策/11`） |
+| `GVHMR/` | 传输包快照，固定 2024 发布版（上游 commit 44fbc1999dd57d2180e882c62c78d356d4c840d0） |
+| `SAM3DB/` | 传输包快照：fast-sam-3d-body + dinov3 + mhr + sam-3d-body（见 `决策/11`） |
 
 ## 审计规则（本仓库唯一纪律）
 
@@ -20,7 +23,8 @@
 
 ## 两库契约（与主项目仓库的关系）
 
-- **本仓库只放**：四个模型的原生代码 + 决策档案（`决策/`）+ 复现总索引（`01_Baseline复现说明.md`）+ provenance。
+- **本仓库只放**：七个模型的原生代码 + 决策档案（`决策/`）+ 复现总索引（`01_Baseline复现说明.md`）+ provenance。
+- WHAM/GVHMR/SAM3DB 的目录是传输包代码快照，**只作审计与 diff 快照，不可脱离包独立运行**（import 与资产路径指向包内 workspace）；运行（推理验证）一律走包入口 `bin/vb`（`决策/11` 登记边界）。
 - **主项目仓库放**：AnySole 主模型、数据工作区（AnysoleWorkspace）、公共评估协议、results/results_display、configs。
 - 公共评估器（原 `Baselines/utils` 的公共 evaluator）属于主项目仓库的评估协议层，不在本仓库。
 - 主项目仓库通过同级目录引用本仓库（两仓库需放在同一父目录下）。

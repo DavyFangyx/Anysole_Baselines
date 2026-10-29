@@ -81,7 +81,7 @@
 | R2 | smpl.npy GT 监督链 | **几何口径通过、时间对齐不通过**：轴/单位/尺度/R-t 全对，但图像↔mocap 配对偏 +9.5 帧（237.5ms） | — | 静止帧 4.5px 底线 vs lag0 逐关节中位 39.9px；亚帧极小点 +9.25~+9.75 帧；独立第二 2D 源（YOLOX）IoU 峰 lag +10 帧（0.604→0.717）；全库残差 −17…+26 帧 | 待裁定 |
 | R3 | 故障格 cell 35 传导 | 污染成立且为三独立通道：**权重膨胀 ≫ 输入饱和 ≫ 二值假接触**；附带发现侧车 GT 用已退役 th=0.7 + 38 session 旧权重 | — | 1.48% 接触对假阴性（256,041/17,258,724）；8/484 维 20.05% 帧 sigmoid>0.99；假接触 160 帧（0.313%）封闭在 3/96 顶点 | **已执行方案 A（原始侧清洗，主库 753e6ee，见 D8）**；th=0.7 侧车/旧权重归 E3-Q4；下游 facts 重建与接触 GT 口径随 E 收口 |
 
-## §4 六模型状态总表
+## §4 九模型状态总表
 
 （内容取自 `模型输入与监督信号.md` + `决策/11`、`13`、`14`。**输出协议**：`smpl24` = SMPL-24；`bvh23` = BVH-23；`V2T` = 触觉→运动九项族。）
 
@@ -92,6 +92,9 @@
 | FPP-Net | 学习型·时序网络 | (5,26,3) 关键点 + 31×11×2 鞋垫；`tool/adapters/FPP-Net/` | V2T：(484) 压力重建 + (192) 顶点接触概率 | press2Cont 二值（网格级 + 顶点级），加载时由输入派生、**无独立 GT 文件** | T2 ✓ fc1010f + M12 ✓ cedd921 / 主库 bf26da7 + **E3-A ✓ 2026-10-03（数据重建+重训+推理+导出）** | **140/140**（S12102 全 fake 空档案，2026-10-07 口径统一） | R3 已源头清洗；侧车 GT th=0.5 已重生成；val/test 泛化差距 contact mse ≈14× 待观察 |
 | PoseTransOpt | 优化型·逐帧优化 | CLIFF 先验 + 2D 关键点 + FPP 4-flag + 模板深度（RGB 仅可视化）；`mmvp_series/` | smpl24：`opt_result.pth` {pose (T,24,3,3), beta (T,10), trans (T,3)} | 无训练监督（四项损失目标全部由运行时输入派生） | T2 ✓ 71d8466 + D6 逐日期 fx（09f57f7）+ D3 dt（bf26a98） | 归 VP-MoCap 行 **1/36** | 依赖已解除（FPP `pred_contact_smpl` 三 split 齐）；**B7 已修（2026-10-03：VPoser V02_05 自备份恢复 + 官方 env=mmvp，9/9 测试过）**；剩 M5–M7 + 全量跑 |
 | pressure_tookit | 优化型·SMPLify 式 | RGB-D + insole 31×11 + 2D 关键点 + CLIFF + 地面/标定；`mmvp_series/pressure_tookit/` | smpl24：地面系 SMPL npz + OBJ 网格 | 无训练监督（insole 9 区域二值标签 + GMM 先验） | T2 ✓ 3db7efd + M1–M4 ✓ 7706cc6 / 主库 536dfd5 | **0/36** | **数据侧就绪（10-03）**：floor 9/9、depthpro 生产集合内 0 缺失、reports 139/140（S12102 全 fake 已知）；C1 待全量跑；U7（PVE）已裁定启用 |
+| WHAM | 学习型·视频姿态回归 | RGB 视频 + 目标框；预测来自传输包已保存结果（3560 单元），本地导出 `tool/adapters/visual_baselines/`（决策 11） | smpl24：包内 `result.pkl` {pose,trans,betas,verts} CFR 30fps | 无本地训练（零权重零 GPU 先导出；推理验证为后续阶段） | 决策 11 登记 ✓（W1）；导出适配器已实现，冒烟/全量待恢复 | 待导出后评估（项目口径 test 36） | 坐标链 camera→checkerboard→mocap world；回放 gate <0.2mm；PVE 预测自身 beta 跨族不排名；+9.5 帧随 frames.npz 继承 |
+| SAM3DB | 学习型·RGB→MHR→SMPL | RGB + 目标框；包内已保存结果（弱透视相机系+逐帧相似变换） | smpl24：包内 `result.pkl` arrays（global_orient/body_pose/betas/相似变换参数） | 无本地训练（同上） | 决策 11 登记 ✓（W2）；导出适配器已实现 | 待导出后评估 | FK 根 = 相似变换后 pelvis；MHR→SMPL 拟合为解释边界 |
+| GVHMR | 学习型·视频姿态回归（2024 固定版） | RGB + 目标框；包内已保存结果（相机系+世界系双套） | smpl24：包内 `result.npz`（pose/betas/trans/joints_camera/native_*） | 无本地训练（同上） | 决策 11 登记 ✓（W3）；导出适配器已实现 | 待导出后评估 | 正式链用相机系；回放 gate <0.001mm；SMPL-X→SMPL 转换为解释边界 |
 | AnySole（主模型） | 学习型·多模态主线 | 四模式 VT2M/V2M/T2M/V2T，由 config_id 展开；`anysole/`（主库，不在 Baselines 库） | smpl24（V2T 行记 `pressure`）：`predictions/eval_motion/<sid>_<config>.npz` | 鞋垫标签 `contact_method ∈ {joint_and, motion_f6, f6_soft, pressure_f6}`；接触指标为诊断键 | T1 ✓ bc0834a（labels 1400 npz）+ 9120884（HRNet 140/140）；**HMR 已舍弃** | 11 基座 ckpt 齐；12 基座 × 144 npz 已齐（09-30 产出，血缘与口径待核） | 不在 `models_modes.yaml`（矩阵唯一例外） |
 
 ## §5 复现路径（通用五步）
