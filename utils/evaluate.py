@@ -82,6 +82,9 @@ MODEL_ALIASES = {
     "step2motion": "Step2Motion",
     "fpp_v2t": "MMVP_FPP-Net",
     "fppnet": "MMVP_FPP-Net",
+    "wham": "WHAM",
+    "sam3db": "SAM3DB",
+    "gvhmr": "GVHMR",
 }
 
 
