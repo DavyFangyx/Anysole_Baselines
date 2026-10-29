@@ -16,10 +16,42 @@ from losses import PoseLoss, TranslationLoss
 from metrics import get_metrics, test
 from normalizer import Normalizer
 from utils import skeleton_pos_to_rot
+from scipy.spatial.transform import Rotation as SciRotation
 from visualize_compare import DEFAULT_VIZ_DIR, visualize_from_exports
 from bvh_export import joint_names_for_count, write_bvh
 from workspace import DISPLAY_ROOT, RESULTS_ROOT, normalizer_path, resolve_path
 from prediction_export import export_canonical_motion
+
+
+def pred_world_arrays(
+    data: torch.Tensor,
+    dataset: MotionDataset,
+    normalizer: Normalizer,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Predicted world joints (SMPL y-up metres) + global rotations.
+
+    Joints are the model's native output (root-relative positions plus the
+    accumulated displacement trajectory); rotations are the FK solution over
+    the dataset skeleton (same IK the gen.bvh export uses).  No BVH
+    round-trip: the public smpl24 evaluation consumes these arrays directly.
+    """
+    data_np: np.ndarray = normalizer.denormalize_poses(data).cpu().numpy()
+    root = np.cumsum(data_np[:, :3], axis=0)
+    local = data_np[:, 3:].reshape(data_np.shape[0], -1, 3)
+    world = np.concatenate([root[:, None, :], root[:, None, :] + local], axis=1)
+    parents = dataset.parents.cpu().numpy()
+    offsets = dataset.offsets[0].cpu().numpy()
+    poses = np.concatenate([np.zeros((data_np.shape[0], 1, 3)), local], axis=1)
+    quats = skeleton_pos_to_rot(poses, parents, offsets)  # (T,J,4) wxyz
+    xyza = np.concatenate([quats[..., 1:], quats[..., :1]], axis=-1)
+    rots_local = SciRotation.from_quat(xyza.reshape(-1, 4)).as_matrix().reshape(
+        *quats.shape[:-1], 3, 3)
+    rots_global = np.zeros_like(rots_local)
+    for j in range(len(parents)):
+        p = int(parents[j])
+        rots_global[:, j] = rots_local[:, j] if p < 0 else np.einsum(
+            "nij,njk->nik", rots_global[:, p], rots_local[:, j])
+    return world.astype(np.float32), rots_global.astype(np.float32)
 
 
 def pred_to_bvh(
@@ -212,8 +244,10 @@ def run_clip(
     pred_to_bvh(pred, 0, clip_dataset, normalizer, pred_path)
     canonical_path = None
     if getattr(clip_dataset, 'session_ids', None) and name.startswith('S'):
+        world, rotations = pred_world_arrays(pred, clip_dataset, normalizer)
         canonical_path = export_canonical_motion(
-            pred_path, clip_dataset, config['model_dir'], bw_diff_pose_prior.pose_layout)
+            pred_path, clip_dataset, config['model_dir'], bw_diff_pose_prior.pose_layout,
+            world=world, rotations=rotations)
     cs_path = os.path.join(output_dir, name + "_cs.json")
     cs_to_json(cs, clip_dataset, normalizer, cs_path)
     raw_path, raw_start = raw_bvh_info(clip_dataset, name)
@@ -442,9 +476,8 @@ if __name__ == "__main__":
     if args.legacy_positional:
         config['pose_layout'] = 'legacy_positional'
     model_name = os.path.basename(os.path.normpath(args.model_dir))
-    suffix = '_legacy_tail_v2' if config.get('pose_layout') == 'legacy_positional' else '_semantic_v2'
     config["predictions_dir"] = (resolve_path(args.output_dir) if args.output_dir else
-                                 str(RESULTS_ROOT / "baselines/Step2Motion/predictions" / (model_name + suffix)))
+                                 str(RESULTS_ROOT / "baselines/Step2Motion/predictions" / model_name))
     config["visualizations_dir"] = str(DISPLAY_ROOT / "Step2Motion" / model_name)
 
     dataset_path = args.dataset

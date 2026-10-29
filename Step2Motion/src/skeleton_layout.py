@@ -8,21 +8,32 @@ GAIT_JOINT_NAMES = [
     'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftToeBase',
     'RightUpLeg', 'RightLeg', 'RightFoot', 'RightToeBase',
 ]
-LEFT_LEG = ['LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftToeBase']
-RIGHT_LEG = ['RightUpLeg', 'RightLeg', 'RightFoot', 'RightToeBase']
+
+# Native SMPL-24 skeleton (npz joint order), the gait adapter v2 layout.
+SMPL24_JOINT_NAMES = [
+    'pelvis', 'left_hip', 'right_hip', 'spine1', 'left_knee', 'right_knee',
+    'spine2', 'left_ankle', 'right_ankle', 'spine3', 'left_foot', 'right_foot',
+    'neck', 'left_collar', 'right_collar', 'head', 'left_shoulder',
+    'right_shoulder', 'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist',
+    'left_hand', 'right_hand',
+]
+LEFT_LEG = ['left_hip', 'left_knee', 'left_ankle', 'left_foot']
+RIGHT_LEG = ['right_hip', 'right_knee', 'right_ankle', 'right_foot']
 
 
 def joint_names(n_joints, names=None):
     if names is None:
         if n_joints == len(GAIT_JOINT_NAMES):
             names = GAIT_JOINT_NAMES
+        elif n_joints == len(SMPL24_JOINT_NAMES):
+            names = SMPL24_JOINT_NAMES
         elif n_joints == len(DEFAULT_JOINT_NAMES):
             names = DEFAULT_JOINT_NAMES
         else:
             raise ValueError('Unknown skeleton: supply skeleton_joint_names explicitly')
     names = list(names)
-    if len(names) != n_joints or len(set(names)) != n_joints or names[0] != 'Hips':
-        raise ValueError('Skeleton names must be unique, match the pose width, and start with Hips')
+    if len(names) != n_joints or len(set(names)) != n_joints or names[0] not in ('Hips', 'pelvis'):
+        raise ValueError('Skeleton names must be unique, match the pose width, and start with Hips/pelvis')
     return names
 
 
@@ -47,6 +58,10 @@ def metric_joint_indices(n_joints, names=None):
     names = joint_names(n_joints, names)
     def ids(group):
         return [names.index(name) - 1 for name in group]
+    if names[0] == 'pelvis':
+        return dict(legs=ids(LEFT_LEG + RIGHT_LEG),
+                    toes=ids(['left_foot', 'right_foot']),
+                    end_effectors=ids(['left_foot', 'right_foot', 'head', 'left_wrist', 'right_wrist']))
     return dict(legs=ids(LEFT_LEG + RIGHT_LEG),
                 toes=ids(['LeftToeBase', 'RightToeBase']),
                 end_effectors=ids(['LeftToeBase', 'RightToeBase', 'Head', 'LeftHand', 'RightHand']))

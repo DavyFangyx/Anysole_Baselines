@@ -97,7 +97,9 @@ class Repairs(unittest.TestCase):
   from config import load_config
   cfg=load_config(str(ROOT/'results/baselines/Step2Motion/checkpoints/gait_model/copy_config.json'))
   cfg['model_dir']='/tmp/step_semantics_should_not_write'
-  with patch('torch.cuda.is_available',return_value=False):
+  cfg['val_data']=cfg['train_data']  # Explicit overlap, independent of the current split.
+  with patch('torch.cuda.is_available',return_value=False), patch.object(
+   train,'copy_config',side_effect=AssertionError('Overlap guard must stop before training setup')):
    with self.assertRaisesRegex(ValueError,'datasets overlap'):train.main(cfg,True)
  def test_old_clock_metrics_cache_cannot_be_silently_reused(self):
   from Baselines.utils.evaluate import write_comparison

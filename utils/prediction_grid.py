@@ -1,8 +1,18 @@
 """Place generated BVH on canonical frame ids, never on the raw mocap clock."""
+from __future__ import annotations
+
 from pathlib import Path
 import numpy as np
-from Baselines.utils.gt_loading import bvh_joints
-from Baselines.utils.motion_io import load_rotations
+from Baselines.utils.motion_io import load_motion, load_rotations
+
+
+def _semantic_joints(loaded: dict) -> tuple[np.ndarray, tuple[str, ...]]:
+    """Drop BVH EndSite pseudo-joints; keep every semantic joint as-is."""
+    names = tuple(str(n) for n in np.asarray(loaded["names"]).reshape(-1))
+    keep = [i for i, n in enumerate(names) if "EndSite" not in n]
+    if not keep:
+        raise ValueError("BVH has no semantic joints: " + repr(names))
+    return np.asarray(loaded["joints"])[:, keep], tuple(names[i] for i in keep)
 
 
 def bvh_prediction_on_grid(path, row):
@@ -11,7 +21,7 @@ def bvh_prediction_on_grid(path, row):
     if not sidecar.is_file():
         raise ValueError('Generated BVH has no canonical frame map: ' + str(sidecar) +
                          '; rerun fixed inference. Raw mocap timestamps cannot index a local BVH.')
-    points, names, _ = bvh_joints(path)
+    points, names = _semantic_joints(load_motion(path))
     rotations = load_rotations(path)
     order = [rotations['names'].index(name) for name in names]
     with np.load(sidecar, allow_pickle=False) as z:

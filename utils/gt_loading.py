@@ -288,6 +288,12 @@ def protocol_gt(row: dict[str, str], protocol: str) -> tuple[np.ndarray, tuple[s
     if protocol == "bvh23":
         path = resolve_repo_path(row["bvh_path"], REPO_ROOT)
         joints, names, _parents = bvh_joints(path, row)
+        if "pelvis" in names:
+            # Farm BVH content is now the BVH24 export; remap onto the native
+            # BVH-23 layout only here (GT for the legacy protocol).
+            from Baselines.utils.bvh24_to_legacy import remap_joints_smpl_to_legacy
+
+            joints, names, _parents = remap_joints_smpl_to_legacy(joints, names)
         return joints, names
     if protocol == "smpl24":
         path = resolve_repo_path(row["smpl_path"], REPO_ROOT)
@@ -309,6 +315,21 @@ def protocol_gt_surface(row: dict[str, str], protocol: str) -> dict | None:
     return load_surface(path, query_t=query_t)
 
 
+def bvh23_rotation_view(data: dict) -> dict:
+    """Drop BVH EndSite nodes and reorder rotations to the 23-joint BVH-23 order."""
+    names = tuple(str(n) for n in np.asarray(data["names"]).reshape(-1))
+    if "pelvis" in names:
+        # Farm BVH content is now the 2026-10-24 BVH24 export; remap its
+        # SMPL-24 global rotations onto the native BVH-23 layout (same frame).
+        from Baselines.utils.bvh24_to_legacy import remap_rotations_smpl_to_legacy
+
+        rotations, names = remap_rotations_smpl_to_legacy(np.asarray(data["rotations"]), names)
+        return {**data, "rotations": rotations, "names": names}
+    order = [data['names'].index(name) for name in LEGACY_BVH_NAMES]
+    return {**data, 'rotations': np.asarray(data['rotations'])[:, order],
+            'names': tuple(LEGACY_BVH_NAMES)}
+
+
 def protocol_gt_rotations(row: dict[str, str], protocol: str) -> dict:
     protocol = normalize_protocol(protocol)
     if protocol == "bvh23":
@@ -318,9 +339,7 @@ def protocol_gt_rotations(row: dict[str, str], protocol: str) -> dict:
         query_t = session_time_grid(row)
         data = load_rotations(path, query_t=query_t)
         # BVH EndSite nodes are not semantic joints in the public BVH-23 protocol.
-        order = [data['names'].index(name) for name in LEGACY_BVH_NAMES]
-        return {**data, 'rotations': np.asarray(data['rotations'])[:, order],
-                'names': tuple(LEGACY_BVH_NAMES)}
+        return bvh23_rotation_view(data)
     path = resolve_repo_path(row["smpl_path"], REPO_ROOT)
     n = int(float(row["n_frames"]))
     fps = float(row.get("target_fps") or 40.0)

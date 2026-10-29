@@ -87,7 +87,18 @@ def parse_bvh_aligner(path: str | Path, trim_leading_seconds: float = 0.40) -> d
     all_positions = np.zeros((len(raw_frames), len(names), 3), dtype=np.float64)
     all_rotations = np.zeros((len(raw_frames), len(names), 3, 3), dtype=np.float64)
     all_local_rotations = np.zeros_like(all_rotations)
-    display_rotation = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+    # The 2026-10-24 BVH24 export is z-up (Blender) with ZXY channels; the
+    # model-exported SMPL-24 gen.bvh files are y-up with XYZ channels and
+    # must take the legacy y-up->z-up path.  Channel order discriminates.
+    is_bvh24 = (
+        bool(names) and names[0] == "pelvis"
+        and len(channels) > 0
+        and tuple(channels[0][3:]) == ("Zrotation", "Xrotation", "Yrotation")
+    )
+    if is_bvh24:
+        display_rotation = np.array([[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]])
+    else:
+        display_rotation = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
     for frame_index, frame in enumerate(raw_frames):
         positions = np.zeros((len(names), 3), dtype=np.float64)
         global_rotations = []
@@ -111,10 +122,15 @@ def parse_bvh_aligner(path: str | Path, trim_leading_seconds: float = 0.40) -> d
             global_rotations.append(global_rot)
             all_rotations[frame_index, joint_index] = display_rotation @ global_rot @ display_rotation.T
             all_local_rotations[frame_index, joint_index] = display_rotation @ local_rotation @ display_rotation.T
-        # Exact MocapVideoAligner default z-up display conversion.
-        all_positions[frame_index] = np.column_stack(
-            (positions[:, 0], -positions[:, 2], positions[:, 1])
-        )
+        if is_bvh24:
+            all_positions[frame_index] = np.column_stack(
+                (-positions[:, 0], -positions[:, 1], positions[:, 2])
+            )
+        else:
+            # Exact MocapVideoAligner default z-up display conversion.
+            all_positions[frame_index] = np.column_stack(
+                (positions[:, 0], -positions[:, 2], positions[:, 1])
+            )
 
     return {
         "joints": all_positions.astype(np.float32),
@@ -122,6 +138,9 @@ def parse_bvh_aligner(path: str | Path, trim_leading_seconds: float = 0.40) -> d
         "local_rotations": all_local_rotations.astype(np.float32),
         "parents": np.asarray(parents, dtype=np.int64),
         "names": names,
+        # BVH24 exports and model-exported gen.bvh files are metres; the
+        # legacy upstream files are centimetres (offsets ~8-43).
+        "units": "m" if (is_bvh24 or max(float(np.abs(offsets).max()), 0.0) < 1.0) else "cm",
         "fps": 1.0 / frame_time if frame_time > 0 else 40.0,
         "frame_time": frame_time,
         "trim_frames": trim_frames,
