@@ -8,3 +8,5 @@ VP-MoCap/PoseTransOpt/outputs/
 
 # 与归档目录
 Baselines_old.zip
+WHAM/dataset/
+WHAM/checkpoints/
