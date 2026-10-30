@@ -10,3 +10,14 @@ VP-MoCap/PoseTransOpt/outputs/
 Baselines_old.zip
 WHAM/dataset/
 WHAM/checkpoints/
+# 决策 11（2026-10-30 收口）：运行时资产软链（指向主库资产区），不入库
+/GVHMR/hmr4d/network/hmr2/configs/smpl_mean_params.npz
+/GVHMR/hmr4d/utils/body_model/coco_aug_dict.pth
+/GVHMR/hmr4d/utils/body_model/seg_part_info.npy
+/GVHMR/hmr4d/utils/body_model/smpl_3dpw14_J_regressor_sparse.pt
+/GVHMR/hmr4d/utils/body_model/smpl_coco17_J_regressor.pt
+/GVHMR/hmr4d/utils/body_model/smpl_neutral_J_regressor.pt
+/GVHMR/hmr4d/utils/body_model/smplx2smpl_sparse.pt
+/GVHMR/hmr4d/utils/body_model/smplx_verts437.pt
+/SAM3DB/fast-sam-3d-body/mhr2smpl/experiments/multiview_n30000_e500/best_model.pth
+/SAM3DB/fast-sam-3d-body/mhr2smpl/experiments/multiview_n30000_e500/sample_idx.npy
