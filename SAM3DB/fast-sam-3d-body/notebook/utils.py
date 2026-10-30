@@ -13,8 +13,14 @@ import torch
 
 from sam_3d_body import load_sam_3d_body_hf, load_sam_3d_body, SAM3DBodyEstimator
 from sam_3d_body.metadata.mhr70 import pose_info as mhr70_pose_info
-from sam_3d_body.visualization.renderer import Renderer
-from sam_3d_body.visualization.skeleton_visualizer import SkeletonVisualizer
+# 决策 11 登记偏离（2026-10-30）：推理路径不使用渲染器，detectron2 对
+# torch 2.10 无预构建且源侧锁定清单亦未收录；仅 notebook 可视化需要。
+try:
+    from sam_3d_body.visualization.renderer import Renderer
+    from sam_3d_body.visualization.skeleton_visualizer import SkeletonVisualizer
+except ImportError:  # detectron2 / 渲染栈缺失：推理不受影响
+    Renderer = None
+    SkeletonVisualizer = None
 
 LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
 
