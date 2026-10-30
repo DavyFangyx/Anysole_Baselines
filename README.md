@@ -140,6 +140,61 @@ PRESSURE_KDTREE_WORKERS=6 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python
 数据前置（10-03 已生产齐）：floor 9/9 + depthpro 52,328 帧（生产集合 140 内 0 缺失）；
 `model_inputs/pressure_toolkit/v1/` 由主库 `adapters/mmvp_series/pressure_tookit/build_inputs.py` 生成。
 
+### WHAM（学习型 · 视频姿态回归）｜推理 wham env · 调度/导出/评估 touch_gait
+
+```bash
+# ① 本地推理（RGB = raw 农场 + bbox = workspace frontend bbox.npz；产物 result.pkl → work/ 收口区）
+cd /data/fangyuxuan/projects/gait
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/adapters/visual_baselines/generate.py --model wham --split test --gpu <空闲卡>
+
+# ② 导出统一契约（预测 → results/baselines/WHAM/predictions/package_export/eval_motion/）
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model wham --split test --force
+
+# ③ 评估 + 对比（SMPL-24 / V2M 行）
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m Baselines.utils.evaluate --model wham --split test --force
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
+```
+
+没有落盘的中间量管线：所有中间量（bbox / 关键点 / MHR）在推理中生成、不落盘；bbox 消费项目正典
+`shared/frontends/human_masks/sam31/v1/`（direct_csv_bbox）。训练不可复现（官方预训练权重，
+SHA 锁定于项目资产区）。正式数字（test 36）：mpjpe 66.3 / pa 49.0 / root_ATE 2556.9（决策 11）。
+
+### SAM3DB（学习型 · RGB→MHR→SMPL）｜推理 vb_tactile · 调度/导出/评估 touch_gait
+
+```bash
+# ① 本地推理（逐帧 Engine.infer；产物 result.pkl → work/ 收口区）
+cd /data/fangyuxuan/projects/gait
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/adapters/visual_baselines/generate.py --model sam3db --split test --gpu <空闲卡>
+
+# ② 导出统一契约（→ results/baselines/SAM3DB/predictions/package_export/eval_motion/）
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model sam3db --split test --force
+
+# ③ 评估 + 对比
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m Baselines.utils.evaluate --model sam3db --split test --force
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
+```
+
+没有落盘的中间量管线：所有中间量在推理中生成、不落盘。训练不可复现（官方预训练权重）。
+正式数字（test 36）：mpjpe 75.5 / pa 52.0 / root_ATE 563.1（决策 11；root_ATE 全基线最优）。
+
+### GVHMR（学习型 · 视频姿态回归，2024 固定版）｜推理 vb_gvhmr · 调度/导出/评估 touch_gait
+
+```bash
+# ① 本地推理（复用迁移 worker run_request；产物 result.npz → work/ 收口区）
+cd /data/fangyuxuan/projects/gait
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/adapters/visual_baselines/generate.py --model gvhmr --split test --gpu <空闲卡>
+
+# ② 导出统一契约（→ results/baselines/GVHMR/predictions/package_export/eval_motion/）
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model gvhmr --split test --force
+
+# ③ 评估 + 对比
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python -m Baselines.utils.evaluate --model gvhmr --split test --force
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python results_display/script/r_test2_compare.py --split test --force
+```
+
+没有落盘的中间量管线：所有中间量在推理中生成、不落盘。训练不可复现（官方预训练权重，
+SHA 锁定于项目资产区）。正式数字（test 36）：mpjpe 66.6 / pa 51.4 / root_ATE 2274.3（决策 11）。
+
 ### 公共评估对比（主库，全部基线通用）
 
 ```bash
