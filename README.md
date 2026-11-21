@@ -145,7 +145,7 @@ PRESSURE_KDTREE_WORKERS=6 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python
 ```bash
 # ① 本地推理（RGB = raw 农场 + bbox = workspace frontend bbox.npz；产物 result.pkl → work/ 收口区）
 cd /data/fangyuxuan/projects/gait
-/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/adapters/visual_baselines/generate.py --model wham --split test --gpu <空闲卡>
+/data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/adapters/visual_baselines/generate.py --model wham --split test --gpu 5
 
 # ② 导出统一契约（预测 → results/baselines/WHAM/predictions/package_export/eval_motion/）
 /data/fangyuxuan/miniconda3/envs/touch_gait/bin/python AnysoleWorkspace/tool/export_baseline_motion.py --model wham --split test --force

@@ -1,5 +1,6 @@
 from lib.config.config import config_cont as config
 import argparse
+import re
 import torch
 from torch.nn import DataParallel
 import os
@@ -86,9 +87,23 @@ if __name__ == '__main__':
     else:
         gpu_ids = None
 
+    resume_epoch = 0
     if os.path.exists(cfg.load_net_checkpoint):
         print('gc_net : loading from %s' % cfg.load_net_checkpoint)
         gc_net.load_state_dict(torch.load(cfg.load_net_checkpoint))
+        # Resume the native epoch/LR schedule from the latest periodic
+        # checkpoint instead of restarting the counter at 0.  The LR schedule
+        # is a function of the epoch index, so this is the verifiable
+        # continuation of the original run.
+        ckpt_dir = os.path.dirname(cfg.load_net_checkpoint)
+        try:
+            epoch_nums = [int(m.group(1)) for name in os.listdir(ckpt_dir)
+                          if (m := re.match(r'net_epoch_(\d+)$', name))]
+        except FileNotFoundError:
+            epoch_nums = []
+        if epoch_nums:
+            resume_epoch = max(epoch_nums) + 1
+            print('resuming at epoch %d (LR schedule follows the epoch index)' % resume_epoch)
     else:
         print('can not find checkpoint %s' % cfg.load_net_checkpoint)
 
@@ -96,6 +111,7 @@ if __name__ == '__main__':
     recorder = ContRecorder(cfg)
 
     trainer = make_trainer.make_trainer(dataloader, gc_net, optimizer, recorder, gpu_ids, cfg.trainer)
+    trainer.start_epoch = resume_epoch
 
     trainer.train()
     print("=========================Training completed!!!!!=========================")

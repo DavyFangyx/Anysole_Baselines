@@ -48,9 +48,14 @@ DENIED_SOURCES = (
 METRIC_REQUIRES = {
     "mpjpe_mm": ("joint_positions",),
     "pa_mpjpe_mm": ("joint_positions",),
-    "w_mpjpe100_mm": ("joint_positions", "root_translation"),
-    "wa_mpjpe100_mm": ("joint_positions", "root_translation"),
-    "root_ate_mm": ("root_translation",),
+    "global_mpjpe_mm": ("joint_positions", "root_translation"),
+    "ground_pen_mm": ("joint_positions", "root_translation"),
+    # seg20 / W-MPJPE 内部对齐、不依赖世界锚（2026-11-01 对等裁定）；
+    # 世界系指标（root_ate/global_mpjpe/ground_pen）仍要求 root_translation。
+    "w_mpjpe100_mm": ("joint_positions",),
+    "wa_mpjpe100_mm": ("joint_positions",),
+    "root_ate_mm": ("joint_positions", "root_translation"),
+    "root_ate_seg20_mm": ("joint_positions",),
     "root_rte_percent": ("root_translation",),
     "root_orientation_deg": ("root_rotation",),
     "root_orientation_drift_deg": ("root_rotation",),

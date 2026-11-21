@@ -227,6 +227,16 @@ def evaluate_motion_row(entry: dict[str, Any], row: dict[str, str],
         keep = valid_mask(row, n_eval)
         if pred_mask is not None:
             keep &= pred_mask[:n_eval].astype(bool)
+        # 对等裁切（2026-11-01 用户裁定）：与主模型窗口网格一致——只评估完整
+        # 20 帧窗口（尾帧丢弃），使基线有效帧人口与主模型协议相同。
+        # 四折 crossfit（2026-11-08）：折 manifest 已把 valid_frame_indices 钉成
+        # 主模型 cell 的 frame_ids（已是完整窗口；SMPL support 缺口已在 cell
+        # 侧裁掉）。此时再按“有效位置数”尾裁会把预测侧个别 invalid 帧放大成
+        # 丢掉整个末窗（S11011: 520→500），必须跳过。
+        if not str(row.get("frame_ids_pinned") or "").lower() in {"1", "true", "yes"}:
+            _valid_pos = np.flatnonzero(keep)
+            if len(_valid_pos) >= 20:
+                keep[_valid_pos[20 * (len(_valid_pos) // 20):]] = False
 
         want_rotations = bool(applicable & {"root_orientation_deg", "root_orientation_drift_deg", "mpjae_deg"})
         pred_rotations = gt_rotations = None
@@ -300,6 +310,32 @@ def evaluate_motion_row(entry: dict[str, Any], row: dict[str, str],
         base.update(values)
         from Baselines.utils.capabilities import mask_metrics
         mask_metrics(base, applicable, reasons)
+        # GT-anchored trajectory fill for baselines without a world anchor
+        # (Step2Motion: root = cumsum(displacement) from origin).  Same anchor
+        # as the main model's "（GT Anchored）" columns: one GT root per
+        # non-overlapping 20-frame tile, taken at max(tile_start-1, 0).
+        anchor_mode = str(entry.get("translation_anchor") or "")
+        if anchor_mode == "gt_previous_frame_per_window":
+            anchored = np.asarray(pred[:n_eval], dtype=np.float64).copy()
+            window = 20
+            for left in range(0, n_eval, window):
+                anchor_index = max(left - 1, 0)
+                shift = (np.asarray(gt[anchor_index, 0], dtype=np.float64)
+                         - anchored[left, 0])
+                anchored[left:left + window] += shift
+            anchored_values = metrics(
+                anchored, gt[:n_eval], keep, eval_fps,
+                protocol=protocol,
+                names=pred_names,
+                times=times,
+                forward_axis=PROTOCOL_FORWARD_AXIS[protocol],
+            )
+            for key in ("global_mpjpe_mm", "root_ate_mm", "ground_pen_mm"):
+                base[key] = float(anchored_values[key])
+                reasons.pop(key, None)
+                reasons[key] = "gt_anchored: gt_previous_frame_per_window"
+            base["translation_anchor"] = anchor_mode
+            base["gt_anchor_count"] = int(np.ceil(n_eval / window))
         base["n_valid_frames"] = int(keep.sum())
         for metric in METRICS:
             if not math.isfinite(float(base[metric])) and metric in applicable:
@@ -360,10 +396,11 @@ def write_comparison(entry: dict[str, Any], split: str, split_csv: Path,
                      manifest_path: Path, rows: list[dict[str, Any]],
                      summary: dict[str, Any], caps: dict[str, bool], denied: set[str],
                      applicable: set[str], gt_source: str, surface_metrics: bool,
-                     force: bool) -> Path:
-    """Write ``metrics/<split>_comparison.json`` (schema v2) + per-session CSV."""
+                     force: bool, result_tag: str = "") -> Path:
+    """Write ``metrics/<split>[_<tag>]_comparison.json`` (schema v2) + CSV."""
     result_root = _model_result_root(_resolve_results_uri(str(entry["prediction_root"])))
-    output = result_root / "metrics" / f"{split}_comparison.json"
+    suffix = f"_{result_tag}" if result_tag else ""
+    output = result_root / "metrics" / f"{split}{suffix}_comparison.json"
     if output.is_file() and not force:
         try:
             existing = json.loads(output.read_text(encoding="utf-8"))
@@ -441,7 +478,7 @@ def write_comparison(entry: dict[str, Any], split: str, split_csv: Path,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    csv_path = output.with_name(f"{split}_comparison.csv")
+    csv_path = output.with_name(f"{split}{suffix}_comparison.csv")
     fields = ["model", "session_id", "subject_id", "action", "split", "protocol",
               "gt_source", "mode", "family", "status", "reason", "n_valid_frames",
               *METRICS, "prediction", "metric_reasons"]
@@ -473,7 +510,13 @@ def main(argv=None) -> int:
                         help="Skip SMPL surface loading (faster; pve_mm rows stay —).")
     parser.add_argument("--force", action="store_true",
                         help="Overwrite existing schema-v2 comparison files.")
+    parser.add_argument("--prediction-root", default="",
+                        help="override the registry prediction_root (results:// URI or path)")
+    parser.add_argument("--result-tag", default="",
+                        help="suffix for metrics/<split>_<tag>_comparison.json")
     args = parser.parse_args(argv)
+    if args.result_tag and not __import__("re").fullmatch(r"[A-Za-z0-9_.-]+", args.result_tag):
+        raise SystemExit("--result-tag may contain only letters, digits, '_', '.', '-'")
 
     entries = _load_registry(args.registry)
     wanted = {MODEL_ALIASES.get(token.strip().lower(), token.strip().lower())
@@ -491,6 +534,8 @@ def main(argv=None) -> int:
         rows_all = [r for r in rows_all if r["session_id"] in session_filter]
 
     for entry in selected:
+        if args.prediction_root:
+            entry = {**entry, "prediction_root": str(args.prediction_root)}
         name = entry.get("name", "?")
         root = _resolve_results_uri(str(entry.get("prediction_root") or ""))
         pattern = entry.get("pattern") or None
@@ -524,7 +569,7 @@ def main(argv=None) -> int:
             if str(entry.get("mode")) == "V2T" else "native-protocol paired GT (manifest paths)"
         write_comparison(entry, args.split, args.split_csv, args.manifest,
                          rows, summary, caps, denied, applicable, gt_source,
-                         args.surface_metrics, args.force)
+                         args.surface_metrics, args.force, args.result_tag)
         missing = sum(r["status"] == "missing" for r in rows)
         invalid = sum(r["status"] == "invalid" for r in rows)
         print(f"[{name}] ok={len(ok_rows)} missing={missing} invalid={invalid}")

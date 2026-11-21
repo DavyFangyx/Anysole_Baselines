@@ -41,7 +41,8 @@ class ContTrainer:
         self.recorder.init()
         best_loss = None
         patience_left = self.estop_patience
-        for epoch in range(self.epochs):
+        start_epoch = int(getattr(self, 'start_epoch', 0))
+        for epoch in range(start_epoch, self.epochs):
             iter = 0
             loss_ls,loss_press_ls,loss_cont_ls = [],[],[]
             self.adjust_learning_rate(self.optimizer, epoch)
@@ -89,7 +90,15 @@ class ContTrainer:
                 epoch,loss_mean,torch.mean(torch.tensor(loss_press_ls)),torch.mean(torch.tensor(loss_cont_ls))) )
             self.recorder.log(log)
 
-            # ---- early stopping (only when enabled in the config) ----
+            # ---- LR-floor stop: independent of the loss-patience switch ----
+            lr = self.init_lr * (0.1 ** (epoch // self.num_train_epochs))
+            if self.estop_lr_floor > 0 and lr < self.estop_lr_floor \
+                    and epoch >= self.num_train_epochs:
+                print('Early stop at epoch %d: lr %g below floor %g' % (
+                    epoch, lr, self.estop_lr_floor))
+                break
+
+            # ---- loss-patience early stopping (only when enabled) ----
             if self.estop_patience > 0:
                 if best_loss is None or loss_mean < best_loss - self.estop_min_delta:
                     best_loss = loss_mean
@@ -104,10 +113,4 @@ class ContTrainer:
                     print('Early stop at epoch %d: no loss improvement for '
                           '%d epochs (best %f)' % (
                               epoch, self.estop_patience, best_loss))
-                    break
-                lr = self.init_lr * (0.1 ** (epoch // self.num_train_epochs))
-                if self.estop_lr_floor > 0 and lr < self.estop_lr_floor \
-                        and epoch >= self.num_train_epochs:
-                    print('Early stop at epoch %d: lr %g below floor %g' % (
-                        epoch, lr, self.estop_lr_floor))
                     break

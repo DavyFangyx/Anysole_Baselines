@@ -62,12 +62,12 @@ def session_parts(row: dict) -> tuple[str, str]:
 
 
 def command(args: argparse.Namespace, date: str, subject: str, session: str) -> list[str]:
-    base = INPUT_ROOT / date / subject / session
+    base = (args.input_root or INPUT_ROOT) / date / subject / session
     cmd = [
         sys.executable, "-m", "app.optimize",
         f"task.input_path_base={base}",
         f"task.scene_rgbd={base / 'template_scene_rgbd.npy'}",
-        f"task.output_path={OUTPUT_ROOT / date / subject / session}",
+        f"task.output_path={(args.output_root or OUTPUT_ROOT) / date / subject / session}",
         f"gpu={args.gpu}",
     ]
     if args.max_iter is not None:
@@ -93,6 +93,10 @@ def main() -> None:
                         help="Smoke override; must be >=21 for the native Savitzky-Golay filter")
     parser.add_argument("--hydra-root", default="",
                         help="Optional Hydra run root for smoke jobs")
+    parser.add_argument("--input-root", type=Path, default=None,
+                        help="override adapter input root (per-fold trees)")
+    parser.add_argument("--output-root", type=Path, default=None,
+                        help="override native output root (per-fold results)")
     parser.add_argument("--no-visualization", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -104,7 +108,7 @@ def main() -> None:
         if session not in manifest_rows:
             raise KeyError(f"session not in manifest: {session}")
         date, subject = session_parts(manifest_rows[session])
-        base = INPUT_ROOT / date / subject / session
+        base = (args.input_root or INPUT_ROOT) / date / subject / session
         join_path = base / "join_manifest.json"
         if not join_path.is_file():
             print(f"skip {session}: no join manifest (run the PoseTransOpt adapter first)")

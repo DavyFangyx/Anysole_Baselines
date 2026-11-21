@@ -37,7 +37,9 @@ from anysole.utils.metrics import (
     pelvis_align,
     root_orientation_drift_deg,
     root_orientation_error_deg,
+    ground_penetration,
     root_trajectory_metrics,
+    root_trajectory_segmented_error,
     rotation_error_degrees,
     shape_vertex_std,
     temporal_metrics,
@@ -302,9 +304,9 @@ def metrics(
     exists anymore — ``pred``/``gt`` must already be the same native joint
     order, and the metric formulas come from ``anysole.utils.metrics`` only.
 
-    ``root_ate_mm`` is absolute for smpl24 and translation-aligned for bvh23
-    (bvh23 has no world anchor by upstream design; per-sequence translation
-    alignment, drift point o, 2026-10-08).
+    ``root_ate_mm`` is the mean absolute world-frame root error (Mean Root
+    Position Error).  The legacy bvh23 translation-aligned branch was removed
+    2026-11-19 (no bvh23 rows remain).
 
     Root orientation needs ``pred_rotations``/``gt_rotations`` whose channel 0
     is the root rotation; ``forward_axis`` is the fixed body-forward axis of
@@ -341,20 +343,19 @@ def metrics(
         out["pa_mpjpe_mm"] = float(pa_mpjpe(p, g).mean())
     except ValueError:
         pass
-    # 2026-10-08 漂移点 o：bvh23 无世界锚（上游设计，根轨迹 = cumsum(位移) 从原点
-    # 出发），root_ate_mm 逐序列平移对齐后比形状（rte/path 不受影响，rte 本就内部
-    # 对齐）；smpl24 保留绝对世界 ATE。
+    # 全局（未对齐）世界 MPJPE——与主模型协议同定义（协议行 global_mpjpe）。
+    out["global_mpjpe_mm"] = float(mean_point_error(p, g, scale=1000.0).mean())
     traj = root_trajectory_metrics(p[:, 0], g[:, 0])
-    if protocol == "bvh23":
-        aligned = p[:, 0] - (p[:, 0] - g[:, 0]).mean(axis=0)
-        traj["root_ate_mm"] = float(np.linalg.norm(aligned - g[:, 0], axis=-1).mean() * 1000.0)
+    traj["root_ate_seg20_mm"] = root_trajectory_segmented_error(p[:, 0], g[:, 0])
     out.update(traj)
     out.pop("root_path_length_m", None)
     try:
         out["w_mpjpe100_mm"], out["wa_mpjpe100_mm"] = windowed_world_mpjpe(p, g, window=100)
     except ValueError:
         pass
-    temporal = temporal_metrics(p, g, t)
+    # 时序指标用骨盆对齐关节（与主模型协议同口径，2026-11-02 对等修订：
+    # 纯视觉基线的世界平移逐帧噪声在视频中不可见但会灌爆未对齐 jitter）。
+    temporal = temporal_metrics(p_aligned, g_aligned, t)
     for key in ("accel_error_m_s2", "jitter_pred_m_s3", "jitter_gt_m_s3"):
         out[key] = float(temporal[key])
     if pred_rotations is not None and gt_rotations is not None:
@@ -376,6 +377,14 @@ def metrics(
     foot_value, foot_count = foot_sliding_joints(p[:, foot_ids], g[:, foot_ids], t)
     if foot_count:
         out["foot_sliding_mm"] = foot_value
+    # GroundPen（2026-11-01 对等补齐）：display z-up → 原生 y-up 后用 GT 派生
+    # floor（与主模型同源 estimate_floor_y），渗透口径同协议 ground_penetration。
+    if protocol == "smpl24":
+        from anysole.data.smpl_io import estimate_floor_y
+        p_yup = np.stack((p[..., 0], p[..., 2], -p[..., 1]), axis=-1)
+        g_yup = np.stack((g[..., 0], g[..., 2], -g[..., 1]), axis=-1)
+        out["ground_pen_mm"] = float(
+            ground_penetration(p_yup, estimate_floor_y(g_yup))["ground_pen_mean_mm"])
     if pred_vertices is not None and gt_vertices is not None:
         pv = np.asarray(pred_vertices[:n])[keep]
         gv = np.asarray(gt_vertices[:n])[keep]

@@ -245,10 +245,15 @@ if __name__ == '__main__':
     parser.add_argument('--run_smplify', action='store_true',
                         help='Run Temporal SMPLify for post processing')
 
+    parser.add_argument('--checkpoint', type=str, default=None,
+                        help='Override the pretrained checkpoint')
+
     args = parser.parse_args()
 
     cfg = get_cfg_defaults()
     cfg.merge_from_file('configs/yamls/demo.yaml')
+    if args.checkpoint is not None:
+        cfg.TRAIN.CHECKPOINT = args.checkpoint
     
     logger.info(f'GPU name -> {torch.cuda.get_device_name()}')
     logger.info(f'GPU feat -> {torch.cuda.get_device_properties("cuda")}')    

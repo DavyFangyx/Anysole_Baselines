@@ -304,9 +304,31 @@ def main(cfg):
 
         checkpoint = torch.load(cfg['task']['checkpoint_path'])
         model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        if checkpoint.get('optimizer_state_dict'):
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if checkpoint.get('epoch') is not None:
+            start_epoch = int(checkpoint['epoch']) + 1
+        ckpt_eval = checkpoint.get('eval_loss')
+        if isinstance(ckpt_eval, dict) and 'loss' in ckpt_eval:
+            scheduler.best = float(ckpt_eval['loss'])
+        scheduler.num_bad_epochs = 0
 
         log.info("Now continue training")
-        log.info(f"Start epoch: {start_epoch}")
+        log.info(f"Start epoch: {start_epoch}, lr: {optimizer.param_groups[0]['lr']:.3e}")
+
+    # Optional early stopping on the same validation loss that selects the
+    # best checkpoint (default 0 = native 1000-epoch behaviour).  Standing
+    # still on val loss while train loss keeps falling is overfitting; the
+    # best checkpoint is already selected by val loss, so stopping only skips
+    # wasted epochs.
+    early_patience = int(cfg['task'].get('early_stop_patience', 0) or 0)
+    early_min_delta = float(cfg['task'].get('early_stop_min_delta', 0.0) or 0.0)
+    # Verifiable LR-based stop (2026-11-10 ruling): stop once the
+    # ReduceLROnPlateau LR falls below the floor and evaluate the *last*
+    # checkpoint, not the val-best one.  Same floor as the FPP-Net recipe.
+    early_lr_floor = float(cfg['task'].get('early_stop_lr_floor', 0.0) or 0.0)
+    epochs_since_best = 0
+    last_saved_path = None
 
     for epoch in tqdm(range(start_epoch, cfg['task']['epochs'])):
 
@@ -442,14 +464,16 @@ def main(cfg):
         if osp.exists(last_checkpoint_path):
             os.remove(last_checkpoint_path)
         
-        if loss_eval['loss'] < best_eval_loss:
+        if loss_eval['loss'] < best_eval_loss - early_min_delta:
             best_eval_loss = loss_eval['loss']
+            epochs_since_best = 0
+            last_saved_path = osp.join(checkpoint_dir, 'imagepressure2smpl_best.pth')
             torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'eval_loss': loss_eval},
-            osp.join(checkpoint_dir, f'imagepressure2smpl_best.pth'))
+            last_saved_path)
 
             eval_smpl_params = np.concatenate(np.array(smpl_params_all), axis=0)
             joint_all = np.concatenate(np.array(joint_all), axis=0)
@@ -458,12 +482,14 @@ def main(cfg):
             output_file = os.path.join(result_dir, f'eval_result_best.npy')
             np.save(output_file, output)
         else:
+            epochs_since_best += 1
+            last_saved_path = osp.join(checkpoint_dir, f'imagepressure2smpl_{epoch}.pth')
             torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'eval_loss': loss_eval},
-            osp.join(checkpoint_dir, f'imagepressure2smpl_{epoch}.pth'))
+            last_saved_path)
         
             eval_smpl_params = np.concatenate(np.array(smpl_params_all), axis=0)
             joint_all = np.concatenate(np.array(joint_all), axis=0)
@@ -476,15 +502,32 @@ def main(cfg):
         log.info("Train Loss: %.6f, Evaluate Loss: %.6f, MPJPE: %.6f, Contact IoU: %.6f" % (
             loss_train['loss'], loss_eval['loss'], val_mpjpe, val_contact_iou))
 
+        current_lr = float(optimizer.param_groups[0]['lr'])
+        if early_lr_floor > 0 and current_lr < early_lr_floor:
+            log.info("LR-floor early stop at epoch %d: lr %.3e < %.3e "
+                     "(last checkpoint %s)" % (
+                         epoch, current_lr, early_lr_floor, last_saved_path))
+            break
+
+        if early_patience > 0 and epochs_since_best >= early_patience:
+            log.info("Early stop at epoch %d: no val-loss improvement > %.6g "
+                     "for %d epochs (best %.6f)" % (
+                         epoch, early_min_delta, early_patience, best_eval_loss))
+            break
+
     wandb_run.finish()
 
     best_checkpoint = os.path.join(checkpoint_dir, 'imagepressure2smpl_best.pth')
-    if os.path.isfile(best_checkpoint):
+    # 2026-11-10 用户裁定：与主模型同口径 = ckpt_last（LR 触底早停后的最后
+    # checkpoint），不是 val-best。早停关闭时保持原生 best 行为。
+    final_checkpoint = last_saved_path if (early_lr_floor > 0 and last_saved_path) \
+        else best_checkpoint
+    if final_checkpoint and os.path.isfile(final_checkpoint):
         from app.test_frappe import evaluate_checkpoint
-        log.info(f'Training finished. Evaluating {best_checkpoint}')
-        evaluate_checkpoint(cfg, best_checkpoint, result_dir, device=device)
+        log.info(f'Training finished. Evaluating {final_checkpoint}')
+        evaluate_checkpoint(cfg, final_checkpoint, result_dir, device=device)
     else:
-        log.warning(f'Training finished without best checkpoint: {best_checkpoint}')
+        log.warning(f'Training finished without checkpoint: {final_checkpoint}')
 
 if __name__ == '__main__':
     cli_args, remaining = parse_cli_args()
