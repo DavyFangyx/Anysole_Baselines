@@ -1,18 +1,15 @@
 """Data protocols shared by the baseline evaluation side.
 
-Native motion protocols (评估整改任务 01 §4.1, common19 deleted):
+Native motion protocol (评估整改任务 01 §4.1, common19 deleted):
 
 - ``smpl24``: the native SMPL-24 skeleton.  The joint names/parents come from
   ``anysole.types`` (the main model's own protocol module) so there is exactly
   one SMPL-24 table in the repository.
-- ``bvh23``: the native BVH-23 Skeleton3 semantic skeleton (23 joints; the
-  five EndSite markers of the raw files are dropped by ``gt_loading.bvh_joints``).
-  The table lives here — BVH is the baseline-side format, and it must not leak
-  into the AnySole model package.
 
-``smpl24-native`` / ``bvh23-native`` are the protocol identifiers recorded in
-results; the bare tokens are the internal branch keys.  ``pressure`` appears
-in the registry for V2T rows.
+``bvh23`` 已裁定为历史协议（2026-11-24）并从注册移除；BVH 文件读取能力
+（``gt_loading.bvh_joints`` 与 ``bvh24_to_legacy`` 的 BVH24/legacy 坐标与
+通道转换）保留，供 S2M/FPP 数据链继续使用。``smpl24-native`` 是结果中
+记录的协议标识；``pressure`` 出现在注册表中用于 V2T 行。
 """
 
 from __future__ import annotations
@@ -29,19 +26,17 @@ import numpy as np
 from anysole.types import JOINT_NAMES, JOINT_PARENTS
 from anysole.utils.metrics import pelvis_align
 
-PROTOCOLS = ("smpl24", "bvh23")
-PROTOCOL_LABELS = {"smpl24": "smpl24-native", "bvh23": "bvh23-native"}
+PROTOCOLS = ("smpl24",)
+PROTOCOL_LABELS = {"smpl24": "smpl24-native"}
 
 
 def normalize_protocol(protocol: str) -> str:
     value = str(protocol or "").lower().replace("_", "-")
     if value.startswith("smpl"):
         return "smpl24"
-    if value.startswith("bvh"):
-        return "bvh23"
     if value.startswith("pressure"):
         return "pressure"
-    raise ValueError(f"unsupported protocol {protocol!r} (expected smpl24/bvh23/pressure)")
+    raise ValueError(f"unsupported protocol {protocol!r} (expected smpl24/pressure)")
 
 
 # SMPL-24: single source of truth is the main model's protocol module.

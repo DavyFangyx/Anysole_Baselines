@@ -285,16 +285,8 @@ def array_from_file(path: Path) -> tuple[np.ndarray, np.ndarray | None, tuple[st
 def protocol_gt(row: dict[str, str], protocol: str) -> tuple[np.ndarray, tuple[str, ...]]:
     """GT joints in the prediction's native protocol, in native joint order."""
     protocol = normalize_protocol(protocol)
-    if protocol == "bvh23":
-        path = resolve_repo_path(row["bvh_path"], REPO_ROOT)
-        joints, names, _parents = bvh_joints(path, row)
-        if "pelvis" in names:
-            # Farm BVH content is now the BVH24 export; remap onto the native
-            # BVH-23 layout only here (GT for the legacy protocol).
-            from Baselines.utils.bvh24_to_legacy import remap_joints_smpl_to_legacy
-
-            joints, names, _parents = remap_joints_smpl_to_legacy(joints, names)
-        return joints, names
+    # bvh23 历史协议已退役（2026-11-24）：BVH 文件读取能力保留在 bvh_joints/
+    # bvh24_to_legacy，供数据链与展示层使用，不再作为评估协议注册。
     if protocol == "smpl24":
         path = resolve_repo_path(row["smpl_path"], REPO_ROOT)
         n = int(float(row["n_frames"]))
@@ -332,14 +324,6 @@ def bvh23_rotation_view(data: dict) -> dict:
 
 def protocol_gt_rotations(row: dict[str, str], protocol: str) -> dict:
     protocol = normalize_protocol(protocol)
-    if protocol == "bvh23":
-        path = resolve_repo_path(row["bvh_path"], REPO_ROOT)
-        n = int(float(row.get("n_frames") or 0))
-        fps = float(row.get("target_fps") or 40.0)
-        query_t = session_time_grid(row)
-        data = load_rotations(path, query_t=query_t)
-        # BVH EndSite nodes are not semantic joints in the public BVH-23 protocol.
-        return bvh23_rotation_view(data)
     path = resolve_repo_path(row["smpl_path"], REPO_ROOT)
     n = int(float(row["n_frames"]))
     fps = float(row.get("target_fps") or 40.0)

@@ -47,7 +47,7 @@ def export_canonical_motion(path, dataset, checkpoint_dir, pose_layout,
     folder.mkdir(parents=True, exist_ok=True)
     # Separate clip names prevent an internal gap from overwriting another clip.
     output = folder / (dataset.clip_name(0) + '.npz')
-    protocol = 'smpl24' if list(names) and str(names[0]) == 'pelvis' else 'bvh23'
+    protocol = 'smpl24'  # 2026-11-24: bvh23 历史协议已退役
     np.savez_compressed(output, joint_xyz_world=full_world, valid_mask=keep,
                         joint_names=np.asarray(names), joint_rotations=full_rotations,
                         frame_indices=np.arange(n, dtype=np.int64),
